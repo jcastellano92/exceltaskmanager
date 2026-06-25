@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Product Management Tool</title>
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+  <link rel="stylesheet" href="board.css" />
+</head>
+<body>
+
+<!-- ───────────── TOP BAR ───────────── -->
+<header class="topbar">
+  <div class="topbar-left">
+    <button id="back-to-stats" class="icon-btn" title="Back to stats">‹</button>
+    <div class="brand"><span class="brand-dot"></span><span class="brand-text">Product Management Tool</span></div>
+    <div class="view-toggle" id="view-mode-toggle">
+      <button data-mode="mine">My Tasks</button>
+      <button data-mode="list">List</button>
+      <button data-mode="board" class="active">Board</button>
+      <button data-mode="ws">Workstreams</button>
+      <button data-mode="roadmap">Roadmap</button>
+    </div>
+  </div>
+
+  <div class="topbar-middle">
+    <input id="search-box" type="text" placeholder="🔍 Search tasks, owners, tags…" />
+    <div class="filter-wrap">
+      <button id="filter-btn" class="btn btn-secondary filter-btn" type="button">
+        ⚙ Filters <span id="filter-count" class="filter-count" hidden>0</span>
+      </button>
+      <div id="filter-panel" class="filter-panel" hidden>
+        <div class="fp-row"><label>Owner</label>
+          <select id="filter-owner" class="filter"><option value="">All Owners</option></select></div>
+        <div class="fp-row"><label>Workstream</label>
+          <select id="filter-workstream" class="filter"><option value="">All Workstreams</option></select></div>
+        <div class="fp-row"><label>Quarter</label>
+          <select id="filter-quarter" class="filter"><option value="">All Quarters</option></select></div>
+        <div class="fp-row"><label>Goal</label>
+          <select id="filter-goal" class="filter"><option value="">All Goals</option></select></div>
+        <div class="fp-row"><label>Health</label>
+          <select id="filter-health" class="filter">
+            <option value="">Any health</option>
+            <option value="On Track">🟢 On Track</option>
+            <option value="At Risk">🟡 At Risk</option>
+            <option value="Off Track">🔴 Off Track</option>
+          </select></div>
+        <div class="fp-row"><label>Start date</label>
+          <div class="fp-daterange">
+            <input type="date" id="filter-start-from" class="filter" title="Start on/after" />
+            <span class="fp-dash">–</span>
+            <input type="date" id="filter-start-to" class="filter" title="Start on/before" />
+          </div></div>
+        <div class="fp-row"><label>Due date</label>
+          <div class="fp-daterange">
+            <input type="date" id="filter-due-from" class="filter" title="Due on/after" />
+            <span class="fp-dash">–</span>
+            <input type="date" id="filter-due-to" class="filter" title="Due on/before" />
+          </div></div>
+        <div class="fp-row"><label>Subtasks</label>
+          <select id="filter-subtasks" class="filter">
+            <option value="">Any</option>
+            <option value="has">Has subtasks</option>
+            <option value="none">No subtasks</option>
+          </select></div>
+        <div class="fp-row"><label>Milestones</label>
+          <select id="filter-milestone" class="filter">
+            <option value="">All items</option>
+            <option value="yes">◆ Milestones only</option>
+          </select></div>
+        <div class="fp-row"><label>Tags</label>
+          <div class="tag-multi" id="filter-tags">
+            <span class="tag-multi-placeholder">Tags…</span>
+            <div class="tag-multi-menu" id="tag-multi-menu" hidden></div>
+          </div></div>
+        <div class="fp-row"><label>Sort (board)</label>
+          <select id="sort-toggle" class="filter">
+            <option value="wsjf">Priority (WSJF) ↓</option>
+            <option value="due">Due date ↑</option>
+            <option value="pct">% complete ↓</option>
+            <option value="title">Title A–Z</option>
+            <option value="owner">Owner A–Z</option>
+            <option value="manual">Manual order</option>
+          </select></div>
+        <div class="fp-row"><label>Group by (list)</label>
+          <select id="group-toggle" class="filter">
+            <option value="">None</option>
+            <option value="WorkstreamID">Workstream</option>
+            <option value="Owner">Owner</option>
+            <option value="Quarter">Quarter</option>
+            <option value="Status">Status</option>
+            <option value="GoalID">Goal</option>
+            <option value="Health">Health</option>
+          </select></div>
+        <div class="fp-actions">
+          <button id="filter-clear" class="btn btn-secondary btn-sm" type="button">Clear all</button>
+          <button id="filter-done" class="btn btn-primary btn-sm" type="button">Done</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="topbar-right">
+    <button id="identity-chip" class="identity-chip unset" title="Set your name">👤</button>
+    <span id="last-sync" class="sync-tag">Updated —</span>
+    <button id="refresh-btn" class="icon-btn" title="Refresh">⟳</button>
+    <button id="add-task-btn" class="btn btn-primary">+ Add Task</button>
+    <button id="config-btn" class="icon-btn" title="Settings">⚙</button>
+  </div>
+</header>
+
+<!-- ───────────── ACTIVE FILTER CHIPS ───────────── -->
+<div id="active-filters" class="active-filters" hidden></div>
+
+<!-- ───────────── KANBAN ───────────── -->
+<main class="kanban" id="kanban">
+  <!-- columns get rendered dynamically -->
+</main>
+
+<!-- ───────────── LIST VIEW ───────────── -->
+<main class="listview" id="listview" hidden>
+  <!-- table rendered dynamically -->
+</main>
+
+<!-- ───────────── CONFIG VIEW ───────────── -->
+<main class="configview" id="configview" hidden>
+  <!-- rendered dynamically -->
+</main>
+
+<!-- ───────────── MY TASKS DASHBOARD ───────────── -->
+<main class="mineview" id="mineview" hidden>
+  <!-- dashboard rendered dynamically -->
+</main>
+
+<!-- ───────────── WORKSTREAMS VIEW ───────────── -->
+<main class="wsview" id="wsview" hidden>
+  <!-- workstream cards rendered dynamically -->
+</main>
+
+<!-- ───────────── ROADMAP VIEW ───────────── -->
+<main class="roadmapview" id="roadmapview" hidden>
+  <!-- timeline rendered dynamically -->
+</main>
+
+<!-- ───────────── MODAL ───────────── -->
+<div class="modal-overlay" id="modal-overlay" hidden>
+  <div class="modal" id="task-modal">
+    <header class="modal-header">
+      <input id="m-title" class="modal-title-input" placeholder="Task title…" />
+      <button class="close-btn" id="m-close">×</button>
+    </header>
+
+    <div class="modal-body">
+      <!-- LEFT -->
+      <section class="modal-left">
+        <label class="field-label">Description</label>
+        <textarea id="m-description" rows="4" placeholder="Describe the task…"></textarea>
+
+        <div class="section-block">
+          <h4>Subtasks <span id="m-subtask-count" class="muted"></span></h4>
+          <ul id="m-subtask-list" class="subtask-list"></ul>
+          <button class="btn-link" id="m-add-subtask">+ Add subtask</button>
+        </div>
+
+        <div class="section-block">
+          <h4>Attachments</h4>
+          <ul id="m-att-list" class="att-list"></ul>
+          <button class="btn-link" id="m-add-att">+ Add Attachment</button>
+          <div id="m-att-form" class="att-form" hidden>
+            <input id="m-att-label" placeholder="Label" />
+            <input id="m-att-url" placeholder="https://…" />
+            <select id="m-att-type">
+              <option value="web">🌐 web</option>
+              <option value="confluence">📄 confluence</option>
+              <option value="sharepoint">📁 sharepoint</option>
+              <option value="file">📎 file</option>
+            </select>
+            <button class="btn btn-primary btn-sm" id="m-att-save">Add</button>
+            <button class="btn btn-secondary btn-sm" id="m-att-cancel">Cancel</button>
+          </div>
+        </div>
+
+        <div class="section-block">
+          <h4 class="collapsible" id="m-activity-toggle">▸ Activity</h4>
+          <ul id="m-activity-list" class="activity-list" hidden></ul>
+        </div>
+      </section>
+
+      <!-- RIGHT -->
+      <section class="modal-right">
+        <div class="wsjf-panel">
+          <div class="wsjf-score-row">
+            <span class="wsjf-score-label">Priority Score (WSJF)</span>
+            <span class="wsjf-score-value" id="m-wsjf-score">—</span>
+          </div>
+          <p class="wsjf-explain">
+            <strong>Higher score = do it sooner.</strong>
+            Score = (Business Value + Time Criticality + Risk/Opportunity) ÷ Job&nbsp;Size.
+            Pick from the Fibonacci scale — bigger numbers mean “a lot more”.
+          </p>
+          <div class="wsjf-sub muted">
+            Value of doing it now: <strong id="m-cod">—</strong>
+            (<span id="m-ubv-readout">—</span>+<span id="m-tc-readout">—</span>+<span id="m-rr-readout">—</span>)
+            ÷ effort <strong id="m-js-readout">—</strong>
+          </div>
+
+          <div class="wsjf-inputs">
+            <label title="How much business/user value does finishing this deliver?">
+              Business Value<select id="m-ubv"></select></label>
+            <label title="How time-sensitive is it? Does value decay if we wait (deadlines, market windows)?">
+              Time Criticality<select id="m-tc"></select></label>
+            <label title="Does it reduce risk or unlock/enable other work and future opportunities?">
+              Risk / Opportunity<select id="m-rr"></select></label>
+            <label title="How big is the effort to deliver it? Bigger = lower priority for the same value.">
+              Job Size (effort)<select id="m-js"></select></label>
+          </div>
+        </div>
+
+        <label class="field-label">Owner</label>
+        <select id="m-owner"></select>
+
+        <label class="field-label">Contributors</label>
+        <div class="contrib-checks" id="m-contributors"></div>
+
+        <label class="field-label">Workstream</label>
+        <select id="m-workstream"></select>
+
+        <label class="field-label">Goals</label>
+        <div class="contrib-checks" id="m-goal"></div>
+
+        <label class="field-label">Quarter</label>
+        <select id="m-quarter"></select>
+        <div id="m-capacity-readout" class="cap-readout" hidden></div>
+
+        <label class="field-label">Status</label>
+        <select id="m-status"></select>
+
+        <label class="field-label">Health</label>
+        <select id="m-health">
+          <option value="">—</option>
+          <option value="On Track">🟢 On Track</option>
+          <option value="At Risk">🟡 At Risk</option>
+          <option value="Off Track">🔴 Off Track</option>
+        </select>
+
+        <label class="field-label checkbox-inline" id="m-milestone-row">
+          <input type="checkbox" id="m-milestone" /> ◆ Milestone (key roadmap date)
+        </label>
+
+        <label class="field-label">Start Date</label>
+        <input type="date" id="m-start" />
+
+        <label class="field-label">Due Date</label>
+        <input type="date" id="m-due" />
+
+        <label class="field-label checkbox-inline" id="m-autopct-row" hidden>
+          <input type="checkbox" id="m-autopct" /> Set % from subtasks
+        </label>
+        <label class="field-label">% Complete: <span id="m-pct-readout">0</span>%</label>
+        <input type="range" min="0" max="100" id="m-pct" />
+
+        <label class="field-label">Tags</label>
+        <div class="tag-input-wrap">
+          <div class="tag-input-pills" id="m-tag-pills"></div>
+          <input id="m-tag-input" type="text" placeholder="Type and press , or Enter…" />
+          <div id="m-tag-suggest" class="tag-suggest" hidden></div>
+        </div>
+
+        <label class="field-label">Blocked By</label>
+        <div class="blocked-by-wrap">
+          <div class="blocked-pills" id="m-blocked-pills"></div>
+          <button class="btn-link" id="m-blocked-add">+ Add</button>
+          <div class="blocked-picker" id="m-blocked-picker" hidden></div>
+        </div>
+
+        <label class="field-label">Linked Epic</label>
+        <div class="readonly" id="m-epic">—</div>
+
+        <label class="field-label">Source</label>
+        <div class="readonly" id="m-source">—</div>
+      </section>
+    </div>
+
+    <footer class="modal-footer">
+      <button class="btn btn-archive" id="m-archive">Archive</button>
+      <div class="footer-right">
+        <button class="btn btn-secondary" id="m-cancel">Cancel</button>
+        <button class="btn btn-primary" id="m-save">Save</button>
+      </div>
+    </footer>
+  </div>
+</div>
+
+<!-- toasts -->
+<div id="toast-host" class="toast-host"></div>
+
+<script src="data.js"></script>
+<script src="board.js"></script>
+</body>
+</html>

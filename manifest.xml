@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+           xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+           xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
+           xsi:type="TaskPaneApp">
+
+  <Id>8a4f1e22-9b2c-4d6f-9a7e-2f1c8e5d6a01</Id>
+  <Version>1.0.0.0</Version>
+  <ProviderName>Internal Tools</ProviderName>
+  <DefaultLocale>en-US</DefaultLocale>
+  <DisplayName DefaultValue="Product Management Tool" />
+  <Description DefaultValue="Product management task board for your team" />
+  <IconUrl DefaultValue="https://YOUR-HOST/icon-32.png" />
+  <HighResolutionIconUrl DefaultValue="https://YOUR-HOST/icon-80.png" />
+  <SupportUrl DefaultValue="https://example.com" />
+
+  <AppDomains>
+    <AppDomain>https://YOUR-HOST</AppDomain>
+  </AppDomains>
+
+  <Hosts>
+    <Host Name="Workbook" />
+  </Hosts>
+
+  <Requirements>
+    <Sets DefaultMinVersion="1.7">
+      <Set Name="ExcelApi" MinVersion="1.7" />
+    </Sets>
+  </Requirements>
+
+  <DefaultSettings>
+    <SourceLocation DefaultValue="https://YOUR-HOST/taskpane.html" />
+  </DefaultSettings>
+
+  <Permissions>ReadWriteDocument</Permissions>
+
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">
+
+      <Requirements>
+        <Sets DefaultMinVersion="1.7">
+          <Set Name="ExcelApi" MinVersion="1.7" />
+          <Set Name="DialogApi" MinVersion="1.2" />
+          <Set Name="SharedRuntime" MinVersion="1.1" />
+        </Sets>
+      </Requirements>
+
+      <Hosts>
+        <Host xsi:type="Workbook">
+          <Runtimes>
+            <Runtime resid="AppRuntime.Url" lifetime="long" />
+          </Runtimes>
+          <DesktopFormFactor>
+            <GetStarted>
+              <Title resid="GetStarted.Title" />
+              <Description resid="GetStarted.Description" />
+              <LearnMoreUrl resid="GetStarted.LearnMoreUrl" />
+            </GetStarted>
+            <FunctionFile resid="AppRuntime.Url" />
+
+            <ExtensionPoint xsi:type="PrimaryCommandSurface">
+              <OfficeTab id="TabHome">
+                <Group id="WsjfGroup">
+                  <Label resid="GroupLabel" />
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16" />
+                    <bt:Image size="32" resid="Icon.32x32" />
+                    <bt:Image size="80" resid="Icon.80x80" />
+                  </Icon>
+                  <Control xsi:type="Button" id="OpenTaskPaneBtn">
+                    <Label resid="OpenTaskPaneBtn.Label" />
+                    <Supertip>
+                      <Title resid="OpenTaskPaneBtn.Title" />
+                      <Description resid="OpenTaskPaneBtn.Tooltip" />
+                    </Supertip>
+                    <Icon>
+                      <bt:Image size="16" resid="Icon.16x16" />
+                      <bt:Image size="32" resid="Icon.32x32" />
+                      <bt:Image size="80" resid="Icon.80x80" />
+                    </Icon>
+                    <Action xsi:type="ShowTaskpane">
+                      <SourceLocation resid="Taskpane.Url" />
+                    </Action>
+                  </Control>
+                </Group>
+              </OfficeTab>
+            </ExtensionPoint>
+          </DesktopFormFactor>
+        </Host>
+      </Hosts>
+
+      <Resources>
+        <bt:Images>
+          <bt:Image id="Icon.16x16" DefaultValue="https://YOUR-HOST/icon-16.png" />
+          <bt:Image id="Icon.32x32" DefaultValue="https://YOUR-HOST/icon-32.png" />
+          <bt:Image id="Icon.80x80" DefaultValue="https://YOUR-HOST/icon-80.png" />
+        </bt:Images>
+        <bt:Urls>
+          <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="https://example.com" />
+          <bt:Url id="Taskpane.Url" DefaultValue="https://YOUR-HOST/taskpane.html" />
+          <bt:Url id="AppRuntime.Url" DefaultValue="https://YOUR-HOST/taskpane.html" />
+        </bt:Urls>
+        <bt:ShortStrings>
+          <bt:String id="GetStarted.Title" DefaultValue="Product Management Tool" />
+          <bt:String id="GroupLabel" DefaultValue="Product Mgmt" />
+          <bt:String id="OpenTaskPaneBtn.Label" DefaultValue="Open PM Tool" />
+          <bt:String id="OpenTaskPaneBtn.Title" DefaultValue="Open Product Management Tool" />
+        </bt:ShortStrings>
+        <bt:LongStrings>
+          <bt:String id="GetStarted.Description" DefaultValue="Product management task board for your team. Backed by this Excel workbook." />
+          <bt:String id="OpenTaskPaneBtn.Tooltip" DefaultValue="Opens the Product Management Tool side panel." />
+        </bt:LongStrings>
+      </Resources>
+    </VersionOverrides>
+  </VersionOverrides>
+</OfficeApp>

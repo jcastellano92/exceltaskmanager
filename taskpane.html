@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <title>Product Management Tool</title>
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <link rel="stylesheet" href="taskpane.css" />
+</head>
+<body>
+  <div class="panel">
+    <header class="panel-header">
+      <div class="logo-row">
+        <div class="logo-dot"></div>
+        <h1>Product Management Tool</h1>
+      </div>
+      <p class="tagline">Task board for your team.</p>
+    </header>
+
+    <section class="panel-body">
+      <button id="open-board-btn" class="btn btn-primary btn-block">
+        🗂️ Open Task Board
+      </button>
+
+      <div class="sync-row">
+        <div class="sync-status">
+          <span class="dot dot-green" id="sync-dot"></span>
+          <span id="sync-text">Ready</span>
+        </div>
+        <button id="sync-now-btn" class="btn btn-secondary btn-sm">Sync Now</button>
+      </div>
+
+      <div class="last-sync">
+        Last sync: <span id="last-sync-time">—</span>
+      </div>
+
+      <hr />
+
+      <div class="quick-stats">
+        <h3>Quick Stats</h3>
+        <div class="stat-row"><span>Total Tasks</span><strong id="stat-total">—</strong></div>
+        <div class="stat-row"><span>My Tasks</span><strong id="stat-mine">—</strong></div>
+        <div class="stat-row"><span>Blocked</span><strong id="stat-blocked">—</strong></div>
+        <div class="stat-row"><span>Done This Q</span><strong id="stat-done">—</strong></div>
+      </div>
+
+      <hr />
+
+      <div class="footer-help">
+        <p><strong>Tip:</strong> The board opens in a large dialog. You can keep this side panel docked for quick stats.</p>
+      </div>
+    </section>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="taskpane.js"></script>
+</body>
+</html>

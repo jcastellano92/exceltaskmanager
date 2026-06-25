@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <title>Product Management Tool</title>
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <link rel="stylesheet" href="taskpane.css" />
+</head>
+<body>
+  <div class="panel">
+    <header class="panel-header">
+      <div class="logo-row">
+        <div class="logo-dot"></div>
+        <h1>Product Management Tool</h1>
+      </div>
+      <p class="tagline">Full-screen task board for your team.</p>
+    </header>
+
+    <section class="panel-body">
+      <button id="open-fs-btn" class="btn btn-primary btn-block">⛶ Open Full-Screen Board</button>
+
+      <div class="sync-row">
+        <div class="sync-status">
+          <span class="dot dot-green" id="sync-dot"></span>
+          <span id="sync-text">Ready</span>
+        </div>
+      </div>
+
+      <hr />
+
+      <div class="footer-help">
+        <p><strong>Keep this panel open.</strong> The board opens as a full-screen
+        panel inside Excel and talks to the workbook <em>through</em> this sidebar,
+        so don't close it while the board is open.</p>
+      </div>
+    </section>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="taskpane-dialog.js"></script>
+</body>
+</html>

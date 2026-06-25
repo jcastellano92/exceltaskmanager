@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Product Management Tool — SIDEBAR + FULL-SCREEN DIALOG variant.
+  Separate add-in from manifest.xml. The ribbon opens a small task pane that has
+  an "Open Full-Screen Board" button; that button opens board.html as a large
+  in-app dialog. Because Office dialogs can't run Excel.run, the dialog routes
+  all data through the task pane via message-passing (see taskpane-dialog.js).
+  Uses the canonical single-block shared-runtime VersionOverrides so the ribbon
+  button renders on the Home tab.
+-->
+<OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+           xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+           xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
+           xsi:type="TaskPaneApp">
+
+  <Id>6f827424-f702-4f4e-bbf0-437f815f9f4f</Id>
+  <Version>1.0.0.2</Version>
+  <ProviderName>Internal Tools</ProviderName>
+  <DefaultLocale>en-US</DefaultLocale>
+  <DisplayName DefaultValue="Product Management Tool" />
+  <Description DefaultValue="Sidebar launcher that opens the Product Management Tool task board as a full-screen dialog." />
+  <IconUrl DefaultValue="https://YOUR-HOST/icon-32.png" />
+  <HighResolutionIconUrl DefaultValue="https://YOUR-HOST/icon-80.png" />
+  <SupportUrl DefaultValue="https://example.com" />
+
+  <AppDomains>
+    <AppDomain>https://YOUR-HOST</AppDomain>
+  </AppDomains>
+
+  <Hosts>
+    <Host Name="Workbook" />
+  </Hosts>
+
+  <Requirements>
+    <Sets DefaultMinVersion="1.1">
+      <Set Name="ExcelApi" MinVersion="1.1" />
+    </Sets>
+  </Requirements>
+
+  <DefaultSettings>
+    <SourceLocation DefaultValue="https://YOUR-HOST/taskpane-dialog.html" />
+  </DefaultSettings>
+
+  <Permissions>ReadWriteDocument</Permissions>
+
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <Requirements>
+      <bt:Sets DefaultMinVersion="1.1">
+        <bt:Set Name="SharedRuntime" MinVersion="1.1" />
+      </bt:Sets>
+    </Requirements>
+    <Hosts>
+      <Host xsi:type="Workbook">
+        <Runtimes>
+          <Runtime resid="WsjfFsRuntime.Url" lifetime="long" />
+        </Runtimes>
+        <DesktopFormFactor>
+          <GetStarted>
+            <Title resid="GetStarted.Title" />
+            <Description resid="GetStarted.Description" />
+            <LearnMoreUrl resid="GetStarted.LearnMoreUrl" />
+          </GetStarted>
+          <FunctionFile resid="WsjfFsRuntime.Url" />
+          <ExtensionPoint xsi:type="PrimaryCommandSurface">
+            <OfficeTab id="TabHome">
+              <Group id="WsjfFsGroup">
+                <Label resid="GroupLabel" />
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16x16" />
+                  <bt:Image size="32" resid="Icon.32x32" />
+                  <bt:Image size="80" resid="Icon.80x80" />
+                </Icon>
+                <Control xsi:type="Button" id="OpenFsPaneBtn">
+                  <Label resid="OpenFsPaneBtn.Label" />
+                  <Supertip>
+                    <Title resid="OpenFsPaneBtn.Title" />
+                    <Description resid="OpenFsPaneBtn.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16" />
+                    <bt:Image size="32" resid="Icon.32x32" />
+                    <bt:Image size="80" resid="Icon.80x80" />
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>WsjfFsTaskpane</TaskpaneId>
+                    <SourceLocation resid="WsjfFsRuntime.Url" />
+                  </Action>
+                </Control>
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
+
+    <Resources>
+      <bt:Images>
+        <bt:Image id="Icon.16x16" DefaultValue="https://YOUR-HOST/icon-16.png" />
+        <bt:Image id="Icon.32x32" DefaultValue="https://YOUR-HOST/icon-32.png" />
+        <bt:Image id="Icon.80x80" DefaultValue="https://YOUR-HOST/icon-80.png" />
+      </bt:Images>
+      <bt:Urls>
+        <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="https://example.com" />
+        <bt:Url id="WsjfFsRuntime.Url" DefaultValue="https://YOUR-HOST/taskpane-dialog.html" />
+      </bt:Urls>
+      <bt:ShortStrings>
+        <bt:String id="GetStarted.Title" DefaultValue="Product Management Tool" />
+        <bt:String id="GroupLabel" DefaultValue="Product Mgmt" />
+        <bt:String id="OpenFsPaneBtn.Label" DefaultValue="Open PM Tool" />
+        <bt:String id="OpenFsPaneBtn.Title" DefaultValue="Open Product Management Tool" />
+      </bt:ShortStrings>
+      <bt:LongStrings>
+        <bt:String id="GetStarted.Description" DefaultValue="Opens a sidebar with a button to launch the Product Management Tool full-screen." />
+        <bt:String id="OpenFsPaneBtn.Tooltip" DefaultValue="Opens the Product Management Tool sidebar; from there launch the full-screen board." />
+      </bt:LongStrings>
+    </Resources>
+  </VersionOverrides>
+</OfficeApp>

@@ -1,0 +1,6 @@
+.claude/
+
+# Confidential workbook data / internal planning — do NOT publish to this PUBLIC repo
+*.xlsx
+DASHBOARD-CAPACITY-NOTES.md
+DASHBOARD-SPEC.md
