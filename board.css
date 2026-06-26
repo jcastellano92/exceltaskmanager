@@ -918,13 +918,34 @@ html, body {
 .ws-progress { height: 8px; background: #eee; border-radius: 4px; overflow: hidden; }
 .ws-progress-fill { height: 100%; background: #137a3e; }
 .ws-progress-label { font-size: 11px; color: #777; }
-.ws-statbar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: #f0f0f0; }
+.ws-statbar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: #f0f0f0; }
 .ws-seg { display: block; }
 .ws-seg-backlog { background: #c9ccd1; }
 .ws-seg-in-progress { background: #f0c14b; }
 .ws-seg-on-track { background: #4a9fe0; }
 .ws-seg-blocked { background: #e06666; }
 .ws-seg-done { background: #57bb7a; }
+.ws-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 10.5px; color: #777; }
+.ws-leg { display: inline-flex; align-items: center; gap: 4px; }
+.ws-leg i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+
+/* Workstream groups (collapsible) */
+.ws-grid-head-right { display: inline-flex; align-items: center; gap: 12px; }
+.ws-group { margin-bottom: 14px; }
+.ws-group-head { display: flex; align-items: center; gap: 10px; width: 100%; border: none; background: #eef0f3; cursor: pointer; padding: 9px 14px; border-radius: 10px; margin-bottom: 10px; font-size: 14px; font-weight: 800; color: #2a2a2a; }
+.ws-group-head:hover { background: #e6e9ee; }
+.ws-group-caret { color: #888; font-size: 12px; }
+.ws-group-name { flex: 0 0 auto; }
+.ws-group-count { font-size: 12px; font-weight: 700; color: #888; background: #fff; border-radius: 999px; padding: 1px 10px; }
+
+/* Dashboard at-risk accordion */
+.ws-acc-head { display: flex; align-items: center; gap: 8px; width: 100%; border: none; background: none; cursor: pointer; padding: 6px 0; text-align: left; }
+.ws-acc-caret { color: #999; font-size: 11px; }
+.ws-acc-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #888; }
+.ws-acc-count { font-size: 11px; font-weight: 800; color: #fff; background: #888; border-radius: 999px; padding: 0 8px; }
+.ws-acc-count.danger { background: #CA001B; }
+.ws-acc-summary { flex: 1; min-width: 0; font-size: 12px; color: #999; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-acc-body { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
 .ws-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .ws-chip { font-size: 11px; font-weight: 600; background: #f0f0f0; color: #555; padding: 2px 8px; border-radius: 999px; }
 .ws-chip.danger { background: #fde8ea; color: #CA001B; }

@@ -1280,17 +1280,61 @@
 
     const header = document.createElement("div");
     header.className = "mine-header ws-grid-header";
-    header.innerHTML = '<h3>All workstreams</h3><span class="mine-who"></span>';
-    header.querySelector(".mine-who").textContent = State.workstreams.length + " streams";
+    header.innerHTML = '<h3>All workstreams</h3>' +
+      '<span class="ws-grid-head-right"><span class="mine-who">' + State.workstreams.length + ' streams</span>' +
+      '<button class="btn btn-primary btn-sm" id="ws-add-btn">+ Add workstream</button></span>';
     root.appendChild(header);
+    header.querySelector("#ws-add-btn").addEventListener("click", () => openWorkstreamEditor(null));
 
+    if (!State.workstreams.length) {
+      const e = document.createElement("div");
+      e.className = "mine-empty";
+      e.textContent = "No workstreams yet. Click “+ Add workstream”.";
+      root.appendChild(e);
+      return;
+    }
+
+    // Group workstreams by their optional Group column (insertion order preserved).
+    const groups = [];
+    const byName = {};
+    State.workstreams.forEach((w) => {
+      const g = String(w.Group || "").trim() || "Workstreams";
+      if (!byName[g]) { byName[g] = { name: g, items: [] }; groups.push(byName[g]); }
+      byName[g].items.push(w);
+    });
+    // Order within a group by optional Order column, then name.
+    groups.forEach((g) => g.items.sort((a, b) =>
+      ((Number(a.Order) || 9999) - (Number(b.Order) || 9999)) ||
+      String(a.Name || a.WorkstreamID).localeCompare(String(b.Name || b.WorkstreamID))));
+
+    const single = groups.length === 1 && groups[0].name === "Workstreams";
+    groups.forEach((g) => root.appendChild(renderWsGroup(g, single)));
+  }
+
+  // Collapsible group of workstream cards. Default closed; remembers last state.
+  function renderWsGroup(g, forceOpen) {
+    const key = "wsGroupOpen:" + g.name;
+    const open = forceOpen || lsGet(key, "0") === "1";
+    const sec = document.createElement("section");
+    sec.className = "ws-group";
+    const head = document.createElement("button");
+    head.className = "ws-group-head";
+    head.innerHTML = '<span class="ws-group-caret">' + (open ? "▾" : "▸") + '</span>' +
+      '<span class="ws-group-name">' + escapeHtml(g.name) + '</span>' +
+      '<span class="ws-group-count">' + g.items.length + ' workstream' + (g.items.length === 1 ? "" : "s") + '</span>';
+    sec.appendChild(head);
     const grid = document.createElement("div");
     grid.className = "ws-grid";
-    State.workstreams.forEach((w) => grid.appendChild(workstreamCard(w)));
-    if (!State.workstreams.length) {
-      grid.innerHTML = '<div class="mine-empty">No workstreams defined. Add some in Config.</div>';
-    }
-    root.appendChild(grid);
+    grid.hidden = !open;
+    g.items.forEach((w) => grid.appendChild(workstreamCard(w)));
+    sec.appendChild(grid);
+    if (!forceOpen) head.addEventListener("click", () => {
+      const nowOpen = grid.hidden;
+      grid.hidden = !nowOpen;
+      head.querySelector(".ws-group-caret").textContent = nowOpen ? "▾" : "▸";
+      lsSet(key, nowOpen ? "1" : "0");
+    });
+    return sec;
   }
 
   // Quarter "bird's-eye" dashboard above the workstream cards.
@@ -1388,23 +1432,42 @@
       sec.appendChild(wrap);
     }
 
-    // Open & at-risk task list for the quarter.
+    // Open & at-risk task list for the quarter — collapsible, default closed.
     const listSec = document.createElement("div");
     listSec.className = "ws-risk-tasks";
-    listSec.innerHTML = '<div class="ws-sub-label">Open &amp; at-risk tasks · ' + escapeHtml(q) + ' (' + atRisk.length + ')</div>';
     if (!atRisk.length) {
-      const e = document.createElement("div"); e.className = "mine-empty"; e.textContent = "Nothing at risk this quarter. 🎉";
-      listSec.appendChild(e);
-    } else {
-      atRisk.slice(0, 15).forEach((t) => listSec.appendChild(mineTaskRow(t)));
-      if (atRisk.length > 15) {
-        const more = document.createElement("div"); more.className = "muted ws-more";
-        more.textContent = "+ " + (atRisk.length - 15) + " more — open the List view to see all.";
-        listSec.appendChild(more);
-      }
+      listSec.innerHTML = '<div class="ws-sub-label">Open &amp; at-risk tasks · ' + escapeHtml(q) + '</div>' +
+        '<div class="mine-empty">Nothing at risk this quarter. 🎉</div>';
+      sec.appendChild(listSec);
+      return sec;
     }
+    const key = "wsAtRiskOpen";
+    const accOpen = lsGet(key, "0") === "1";
+    const topNames = atRisk.slice(0, 3).map((t) => t.Title).join(" · ");
+    const accHead = document.createElement("button");
+    accHead.className = "ws-acc-head";
+    accHead.innerHTML = '<span class="ws-acc-caret">' + (accOpen ? "▾" : "▸") + '</span>' +
+      '<span class="ws-acc-title">Open &amp; at-risk tasks · ' + escapeHtml(q) + '</span>' +
+      '<span class="ws-acc-count danger">' + atRisk.length + '</span>' +
+      '<span class="ws-acc-summary">' + escapeHtml(topNames) + (atRisk.length > 3 ? " …" : "") + '</span>';
+    const accBody = document.createElement("div");
+    accBody.className = "ws-acc-body";
+    accBody.hidden = !accOpen;
+    atRisk.slice(0, 15).forEach((t) => accBody.appendChild(mineTaskRow(t)));
+    if (atRisk.length > 15) {
+      const more = document.createElement("div"); more.className = "muted ws-more";
+      more.textContent = "+ " + (atRisk.length - 15) + " more — open the List view to see all.";
+      accBody.appendChild(more);
+    }
+    accHead.addEventListener("click", () => {
+      const nowOpen = accBody.hidden;
+      accBody.hidden = !nowOpen;
+      accHead.querySelector(".ws-acc-caret").textContent = nowOpen ? "▾" : "▸";
+      lsSet(key, nowOpen ? "1" : "0");
+    });
+    listSec.appendChild(accHead);
+    listSec.appendChild(accBody);
     sec.appendChild(listSec);
-
     return sec;
   }
 
@@ -1452,11 +1515,12 @@
       '</div>' +
       (w.Owner ? '<div class="ws-owner">👤 ' + escapeHtml(w.Owner) + '</div>' : '') +
       (w.UserStory ? '<p class="ws-story">' + escapeHtml(w.UserStory) + '</p>' : '') +
-      '<div class="ws-progress"><div class="ws-progress-fill" style="width:' + pctDone + '%"></div></div>' +
-      '<div class="ws-progress-label">' + done + ' / ' + total + ' done · ' + pctDone + '% · avg ' + avgPct + '% complete</div>' +
-      '<div class="ws-statbar">' +
+      '<div class="ws-statbar" title="Status mix across this workstream’s tasks">' +
         COLUMNS.map((s) => counts[s] ? '<span class="ws-seg ws-seg-' + statusSlug(s) + '" style="flex:' + counts[s] + '" title="' + escapeAttr(s + ": " + counts[s]) + '"></span>' : '').join('') +
       '</div>' +
+      '<div class="ws-progress-label"><b>' + done + ' / ' + total + '</b> done · ' + pctDone + '% · avg ' + avgPct + '% complete</div>' +
+      '<div class="ws-legend">' + COLUMNS.filter((s) => counts[s]).map((s) =>
+        '<span class="ws-leg"><i class="ws-seg-' + statusSlug(s) + '"></i>' + escapeHtml(s) + ' ' + counts[s] + '</span>').join('') + '</div>' +
       '<div class="ws-chips">' +
         '<span class="ws-chip">' + total + ' tasks</span>' +
         (blocked ? '<span class="ws-chip danger">' + blocked + ' blocked</span>' : '') +
@@ -1486,6 +1550,8 @@
   // Edit a workstream's info (owner, status, story, metrics, goals, quarters)
   // directly from the Workstreams page.
   function openWorkstreamEditor(w) {
+    const isNew = !w;
+    w = w || {};
     const goals = State.goals || [];
     const quarters = State.config.Quarters || [];
     const curGoals = new Set(String(w.Goals || "").split(/[;,]/).map((s) => s.trim()).filter(Boolean));
@@ -1501,8 +1567,12 @@
     const box = document.createElement("div");
     box.className = "confirm-box ws-editor";
     box.innerHTML =
-      '<div class="wse-head"><h3>Edit workstream</h3><span class="wse-id">' + escapeHtml(w.WorkstreamID) + '</span></div>' +
+      '<div class="wse-head"><h3>' + (isNew ? "New workstream" : "Edit workstream") + '</h3><span class="wse-id">' + escapeHtml(w.WorkstreamID || "auto-ID") + '</span></div>' +
       '<label class="wse-label">Name<input id="wse-name" type="text" /></label>' +
+      '<div class="wse-metrics">' +
+        '<label class="wse-label">Group <span class="muted">(optional)</span><input id="wse-group" type="text" placeholder="e.g. Portfolio" /></label>' +
+        '<label class="wse-label">Order <span class="muted">(optional)</span><input id="wse-order" type="number" placeholder="1" /></label>' +
+      '</div>' +
       '<div class="wse-label">Owner(s)<div class="wse-checks" id="wse-owners"></div></div>' +
       '<label class="wse-label">Status<select id="wse-status"></select></label>' +
       '<label class="wse-label">User story<textarea id="wse-story" rows="3"></textarea></label>' +
@@ -1520,6 +1590,8 @@
     document.body.appendChild(host);
 
     box.querySelector("#wse-name").value = w.Name || "";
+    box.querySelector("#wse-group").value = w.Group || "";
+    box.querySelector("#wse-order").value = (w.Order != null && w.Order !== "") ? w.Order : "";
     box.querySelector("#wse-story").value = w.UserStory || "";
     box.querySelector("#wse-m1").value = w.Metric1 || "";
     box.querySelector("#wse-m2").value = w.Metric2 || "";
@@ -1554,8 +1626,11 @@
     box.querySelector("#wse-save").addEventListener("click", async () => {
       const getChecks = (sel) => Array.from(box.querySelectorAll(sel + " input:checked")).map((c) => c.value).join(",");
       const ownerVal = Array.from(box.querySelectorAll("#wse-owners input:checked")).map((c) => c.value).join("; ");
+      const orderVal = box.querySelector("#wse-order").value.trim();
       const fields = {
         Name: box.querySelector("#wse-name").value.trim(),
+        Group: box.querySelector("#wse-group").value.trim(),
+        Order: orderVal === "" ? "" : Number(orderVal),
         Owner: ownerVal,
         Status: box.querySelector("#wse-status").value,
         UserStory: box.querySelector("#wse-story").value.trim(),
@@ -1568,8 +1643,14 @@
       if (!fields.Name) { toast("Name is required.", "warn"); return; }
       const saveBtn = box.querySelector("#wse-save"); saveBtn.disabled = true; saveBtn.textContent = "Saving…";
       try {
-        await window.WsjfData.updateWorkstream(w.WorkstreamID, fields);
-        toast("Workstream updated.", "info");
+        if (isNew) {
+          const id = nextSequentialId(State.workstreams, "WorkstreamID", "WS");
+          await window.WsjfData.createWorkstream(Object.assign({ WorkstreamID: id }, fields));
+          toast("Workstream " + id + " created.", "info");
+        } else {
+          await window.WsjfData.updateWorkstream(w.WorkstreamID, fields);
+          toast("Workstream updated.", "info");
+        }
         close();
         await afterConfigChange();
       } catch (e) {
@@ -3546,6 +3627,10 @@
   function statusSlug(s) {
     return String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-");
   }
+
+  // Tiny localStorage helpers (remember accordion open/closed state, etc.).
+  function lsGet(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch (e) { return d; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 
   // Schedule chip (PI planning): green » when net accelerated, red « when net
   // delayed (rolled over). Driven by the optional signed Slips counter.
