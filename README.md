@@ -13,8 +13,10 @@ changes back to them.
    `https://YOUR-HOST` placeholders with your host and set a support URL.
 3. **Sideload** the manifest in Excel (Add-ins → Upload My Add-in), or deploy it
    centrally via your Microsoft 365 admin center.
-4. Open the backing workbook (it must contain the expected tables, e.g.
-   `TasksTable`, `WorkstreamsTable`, `GoalsTable`, `SubtasksTable`, `Config`).
+4. Open the backing workbook (it must contain the expected named tables, e.g.
+   `TasksTable`, `WorkstreamsTable`, `GoalsTable`, `SubtasksTable`, `UpdatesTable`,
+   `MilestonesTable`, `Config`). See **[SETUP-TABLES.md](SETUP-TABLES.md)** for the
+   full list of tables and required columns.
 
 No build step — it's plain HTML/CSS/JS.
 
