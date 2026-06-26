@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Product Management Tool</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+  <!-- Self-hosted (a CDN reference here gets blocked on locked-down corporate networks, which silently kills drag-and-drop). -->
+  <script src="sortable.min.js"></script>
   <link rel="stylesheet" href="board.css" />
 </head>
 <body>
@@ -169,21 +170,25 @@
       </div>
     </div>
 
-    <!-- TABS -->
-    <div class="modal-tabs" id="m-tabs">
-      <button type="button" data-tab="details" class="active">Details</button>
-      <button type="button" data-tab="subtasks">Subtasks <span id="m-subtask-count" class="tab-count"></span></button>
-      <button type="button" data-tab="updates">Updates <span id="m-updates-count" class="tab-count"></span></button>
-      <button type="button" data-tab="activity">Activity</button>
-    </div>
-
-    <div class="modal-body2">
-      <!-- DETAILS -->
-      <section class="tabpane" data-pane="details">
+    <div class="modal-body3">
+      <!-- MAIN (details) -->
+      <div class="mb-main">
         <div class="details-grid">
           <div class="dg-main">
             <label class="field-label">Description</label>
             <textarea id="m-description" rows="3" placeholder="Describe the task…"></textarea>
+
+            <!-- SUBTASKS (collapsible, under description) -->
+            <div class="subtasks-block">
+              <button type="button" class="subtasks-head" id="m-subtasks-toggle">
+                <span class="st-caret" id="m-subtasks-caret">▸</span>
+                Subtasks <span id="m-subtask-count" class="tab-count"></span>
+              </button>
+              <div class="subtasks-body" id="m-subtasks-body" hidden>
+                <ul id="m-subtask-list" class="subtask-list"></ul>
+                <button class="btn-link" id="m-add-subtask">+ Add subtask</button>
+              </div>
+            </div>
 
             <div class="dg-two">
               <div>
@@ -256,27 +261,25 @@
             </div>
           </div>
         </div>
-      </section>
+      </div>
 
-      <!-- SUBTASKS -->
-      <section class="tabpane" data-pane="subtasks" hidden>
-        <ul id="m-subtask-list" class="subtask-list"></ul>
-        <button class="btn-link" id="m-add-subtask">+ Add subtask</button>
-      </section>
-
-      <!-- UPDATES -->
-      <section class="tabpane" data-pane="updates" hidden>
-        <div id="m-updates-list" class="updates-list"></div>
-        <div class="update-add">
-          <textarea id="m-update-text" rows="2" placeholder="Add an update…"></textarea>
-          <button class="btn btn-primary btn-sm" id="m-update-add">Post update</button>
+      <!-- RIGHT RAIL: Updates / Activity feed -->
+      <aside class="mb-rail">
+        <div class="rail-tabs" id="m-rail-tabs">
+          <button type="button" data-rail="updates" class="active">Updates <span id="m-updates-count" class="tab-count"></span></button>
+          <button type="button" data-rail="activity">Activity</button>
         </div>
-      </section>
-
-      <!-- ACTIVITY -->
-      <section class="tabpane" data-pane="activity" hidden>
-        <ul id="m-activity-list" class="activity-list"></ul>
-      </section>
+        <div class="rail-pane" data-railpane="updates">
+          <div id="m-updates-list" class="updates-list"></div>
+          <div class="update-add">
+            <textarea id="m-update-text" rows="2" placeholder="Add an update…"></textarea>
+            <button class="btn btn-primary btn-sm" id="m-update-add">Post update</button>
+          </div>
+        </div>
+        <div class="rail-pane" data-railpane="activity" hidden>
+          <ul id="m-activity-list" class="activity-list"></ul>
+        </div>
+      </aside>
     </div>
 
     <footer class="modal-footer">

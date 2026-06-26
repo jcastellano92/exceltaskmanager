@@ -461,14 +461,14 @@ html, body {
 .hp.active.hp-at-risk { background: #e0a100; border-color: #e0a100; color: #fff; }
 .hp.active.hp-off-track { background: #CA001B; border-color: #CA001B; color: #fff; }
 .hp.active { background: #888; border-color: #888; color: #fff; }
-.mm-select { width: auto !important; min-width: 130px; height: 34px; border: 1px solid #dcdcdc; border-radius: 8px; padding: 4px 8px; font-size: 13px; background: #fff; }
+.mm-select { width: auto !important; min-width: 130px; min-height: 36px; box-sizing: border-box; line-height: 1.4; border: 1px solid #dcdcdc; border-radius: 8px; padding: 6px 10px; font-size: 13px; background: #fff; }
 .mm-wsjf { margin-left: auto; display: inline-flex; align-items: baseline; gap: 5px; }
 .mm-wsjf b { font-size: 22px; font-weight: 800; color: #CA001B; }
 .mm-wsjf span { font-size: 11px; color: #999; font-weight: 700; }
 
 .modal-people { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 22px; border-bottom: 1px solid #f0f0f0; }
 .mp-label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #999; }
-.mp-owner { width: auto !important; height: 32px; border: 1px solid #dcdcdc; border-radius: 8px; padding: 4px 8px; font-size: 13px; background: #fff; max-width: 220px; }
+.mp-owner { width: auto !important; min-width: 160px; min-height: 34px; box-sizing: border-box; line-height: 1.4; border: 1px solid #dcdcdc; border-radius: 8px; padding: 6px 10px; font-size: 13px; background: #fff; max-width: 280px; }
 .mp-sep { color: #ddd; }
 .people-chips { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .person-chip { display: inline-flex; align-items: center; gap: 5px; background: #f1f1f4; border-radius: 14px; padding: 2px 8px 2px 2px; font-size: 12px; }
@@ -488,10 +488,26 @@ html, body {
 .modal-tabs button:hover { color: #333; }
 .modal-tabs button.active { color: #CA001B; border-bottom-color: #CA001B; }
 .tab-count { color: #aaa; font-weight: 600; font-size: 11px; }
-.modal-body2 { flex: 1; overflow-y: auto; padding: 18px 22px 24px; }
+/* Body = main details (left) + Updates/Activity rail (right) */
+.modal-body3 { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+.mb-main { flex: 1; overflow-y: auto; padding: 18px 22px 24px; min-width: 0; }
+.mb-rail { width: 300px; flex: 0 0 300px; border-left: 1px solid #eee; background: #fcfcfd; display: flex; flex-direction: column; min-height: 0; }
+.rail-tabs { display: flex; gap: 2px; padding: 10px 14px 0; border-bottom: 1px solid #eee; }
+.rail-tabs button { border: none; background: transparent; padding: 8px 12px; font-size: 13px; font-weight: 700; color: #777; cursor: pointer; border-bottom: 2px solid transparent; }
+.rail-tabs button:hover { color: #333; }
+.rail-tabs button.active { color: #CA001B; border-bottom-color: #CA001B; }
+.rail-pane { flex: 1; overflow-y: auto; padding: 12px 14px; }
+.rail-pane[hidden] { display: none; }
 .tabpane[hidden] { display: none; }
-.details-grid { display: grid; grid-template-columns: 1fr 360px; gap: 28px; }
+.details-grid { display: grid; grid-template-columns: 1fr 340px; gap: 24px; }
 .dg-main, .dg-side { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+
+/* Subtasks block (collapsible, under description) */
+.subtasks-block { border-top: 1px solid #eee; margin-top: 10px; padding-top: 4px; }
+.subtasks-head { display: flex; align-items: center; gap: 6px; width: 100%; border: none; background: none; cursor: pointer; padding: 7px 2px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #555; }
+.subtasks-head:hover { color: #CA001B; }
+.subtasks-head .st-caret { color: #999; font-size: 11px; }
+.subtasks-body[hidden] { display: none; }
 .dg-two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .dg-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .dg-dates .field-label { display: flex; flex-direction: column; gap: 3px; }
@@ -514,6 +530,8 @@ html, body {
 .modal select {
   width: 100%;
   font: inherit;
+  line-height: 1.4;
+  box-sizing: border-box;
   padding: 9px 11px;
   border: 1px solid #dcdcdc;
   border-radius: 8px;
@@ -521,6 +539,7 @@ html, body {
   color: #333;
   transition: border-color .15s ease, box-shadow .15s ease;
 }
+.modal select { min-height: 38px; }   /* keep option text from clipping in Excel's webview */
 .modal textarea { resize: vertical; }
 .modal textarea:focus,
 .modal input:focus,
@@ -541,32 +560,28 @@ html, body {
 }
 .section-block h4 .muted { color: #aaa; font-weight: 500; }
 
-/* Subtasks */
+/* Subtasks — one compact line each (click text to open the subtask modal) */
 .subtask-list { list-style: none; padding: 0; margin: 0 0 6px; }
 .subtask-item {
-  padding: 7px 6px; border-bottom: 1px solid #f1f1f3; border-radius: 8px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 6px; border-bottom: 1px solid #f1f1f3; border-radius: 8px;
 }
 .subtask-item:hover { background: #fafafb; }
-.st-main { display: flex; align-items: center; gap: 8px; }
-.st-main .drag { cursor: grab; color: #c4c4c4; font-size: 13px; flex: 0 0 auto; }
-.st-main input[type="checkbox"] { flex: 0 0 auto; cursor: pointer; }
+.subtask-item .drag { cursor: grab; color: #c4c4c4; font-size: 13px; flex: 0 0 auto; }
+.subtask-item > input[type="checkbox"] { flex: 0 0 auto; cursor: pointer; }
 .subtask-text {
-  flex: 1; min-width: 0;
-  border: 1px solid transparent; border-radius: 6px;
-  background: transparent; font-size: 13px; padding: 5px 7px;
+  flex: 1; min-width: 0; cursor: pointer;
+  font-size: 13px; color: #333; padding: 2px 4px; border-radius: 6px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.subtask-text:hover { background: #f2f2f4; }
-.subtask-text:focus { outline: none; border-color: #cfcfcf; background: #fff; }
+.subtask-text:hover { background: #eef2ff; color: #1a4fd0; }
 .st-done .subtask-text { color: #a5a5a5; text-decoration: line-through; }
-.st-meta { display: flex; align-items: center; gap: 14px; margin: 6px 0 1px 28px; flex-wrap: wrap; }
-.st-field { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: #9a9a9a; }
-.subtask-due, .subtask-owner {
-  border: 1px solid #e0e0e0; border-radius: 6px; font: inherit; font-size: 12px;
-  padding: 3px 6px; color: #444; background: #fff;
-}
-.subtask-due { width: 134px; }
-.subtask-owner { max-width: 150px; }
-.subtask-doneon { font-size: 11px; color: #2e9e5b; font-weight: 700; }
+.st-rowmeta { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.st-due-chip { font-size: 11px; color: #777; white-space: nowrap; }
+.st-due-chip.overdue { color: #CA001B; font-weight: 700; }
+.st-avatar { width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; color: #2b2b2b; }
+.subtask-item .st-open, .subtask-item .icon-trash { flex: 0 0 auto; opacity: .55; }
+.subtask-item:hover .st-open, .subtask-item:hover .icon-trash { opacity: 1; }
 
 /* Contributors (multi-select in the task modal) */
 .contrib-checks { display: flex; flex-wrap: wrap; gap: 5px 14px; padding: 2px 0; }
@@ -1032,9 +1047,9 @@ html, body {
 .rm-mslines { position: absolute; left: 210px; right: 0; top: 26px; bottom: 0; pointer-events: none; z-index: 0; }
 .rm-msline { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed #94a3b8; opacity: .5; }
 .rm-ms-row { height: 30px; background: #fcfcfd; }
-.rm-ms-rowlabel { font-weight: 700; color: #475569; display: flex; align-items: center; gap: 6px; }
-.rm-ms-add { border: 1px solid #d4d4d8; background: #fff; border-radius: 6px; width: 20px; height: 20px; line-height: 1; cursor: pointer; color: #555; font-weight: 700; padding: 0; }
-.rm-ms-add:hover { background: #f1f5f9; }
+.rm-ms-rowlabel { font-weight: 700; color: #475569; display: flex; align-items: center; gap: 6px; overflow: visible; }
+.rm-ms-add { border: 1px solid #d4d4d8; background: #fff; border-radius: 999px; height: 22px; line-height: 1; cursor: pointer; color: #475569; font-weight: 700; font-size: 11px; padding: 0 10px; white-space: nowrap; }
+.rm-ms-add:hover { background: #eef2ff; border-color: #c7d2fe; color: #3730a3; }
 .rm-ms-flag { position: absolute; top: 4px; transform: translateX(-2px); display: inline-flex; align-items: center; gap: 3px; cursor: pointer; z-index: 4; white-space: nowrap; }
 .rm-ms-diostamp { color: var(--mc, #7a5cff); font-size: 14px; line-height: 1; }
 .rm-ms-flaglabel { font-size: 10.5px; font-weight: 700; color: #334155; background: rgba(255,255,255,.85); padding: 0 4px; border-radius: 3px; }
@@ -1104,15 +1119,16 @@ html, body {
 .sched-early { background: #eaf7ef; color: #1f7a44; border-color: #bfe3cd; }  /* accelerated */
 
 /* Pull earlier / Slip later buttons in the modal */
-.reschedule-row { display: flex; gap: 8px; margin-top: 6px; }
+.reschedule-row { display: inline-flex; gap: 8px; margin-left: 4px; }
 .btn-resched {
-  flex: 1; border: 1px solid #dcdcdc; background: #fff; cursor: pointer;
-  border-radius: 8px; padding: 6px 8px; font-size: 12px; font-weight: 700; color: #555;
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  border: 1px solid #dcdcdc; background: #fff; cursor: pointer;
+  border-radius: 999px; padding: 6px 14px; font-size: 12px; font-weight: 700; color: #555;
 }
 .btn-resched:hover { background: #f5f5f6; border-color: #c2c2c2; color: #222; }
-.btn-resched.btn-win { color: #1f7a44; }
+.btn-resched.btn-win { color: #1f7a44; border-color: #cfe9d9; background: #f3fbf6; }
 .btn-resched.btn-win:hover { background: #eaf7ef; border-color: #bfe3cd; color: #155f34; }
-.btn-resched.btn-loss { color: #a6601a; }
+.btn-resched.btn-loss { color: #a6601a; border-color: #f0dcbf; background: #fffaf2; }
 .btn-resched.btn-loss:hover { background: #fff4e5; border-color: #f0d9b5; color: #7d4612; }
 
 /* Capacity readout in the task modal */
