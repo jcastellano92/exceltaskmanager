@@ -97,6 +97,7 @@
       "getCurrentUser", "setCurrentUser", "readAllTasks", "readArchivedTasks", "readTaskById",
       "writeTask", "writeTaskStatus", "createTask", "archiveTask",
       "readSubtasksForTask", "readAttachmentsForTask", "readActivityForTask",
+      "readUpdatesForParent", "createUpdate",
       "writeSubtask", "createSubtask", "deleteSubtask", "toggleSubtask",
       "writeAttachment", "createAttachment", "deleteAttachment",
       "readConfigList", "addConfigValue", "renameConfigValue", "deleteConfigValue",
@@ -408,7 +409,7 @@
 
     el.innerHTML = `
       <div class="kcard-head">
-        <span class="kcard-title" title="${escapeAttr(task.Title)}">${isMilestone ? '<span class="milestone-mark" title="Milestone">◆</span> ' : ""}${healthDot}${rolloverBadge(task)}${escapeHtml(task.Title || "")}</span>
+        <span class="kcard-title" title="${escapeAttr(task.Title)}">${isMilestone ? '<span class="milestone-mark" title="Milestone">◆</span> ' : ""}${healthDot}${scheduleChip(task)}${escapeHtml(task.Title || "")}</span>
         <span class="wsjf-pill ${wsjfClass}">${wsjf.toFixed(1)}</span>
       </div>`;
     el.innerHTML += `
@@ -674,7 +675,7 @@
       : '';
     let h = '<tr data-task-id="' + t.TaskID + '">' +
       '<td class="sel-col"><input type="checkbox" class="sel-row" data-id="' + t.TaskID + '"' + (State.selected.has(Number(t.TaskID)) ? " checked" : "") + ' /></td>' +
-      '<td class="list-title">' + caret + rolloverBadge(t) + escapeHtml(t.Title || "") + '</td>' +
+      '<td class="list-title">' + caret + scheduleChip(t) + escapeHtml(t.Title || "") + '</td>' +
       '<td><span class="status-chip status-' + statusSlug(t.Status) + '">' + escapeHtml(t.Status || "") + '</span></td>' +
       '<td>' + escapeHtml(t.Owner || "") + '</td>' +
       '<td>' + escapeHtml(workstreamName(t.WorkstreamID)) + '</td>' +
@@ -905,35 +906,48 @@
     const n = State.selected.size;
     if (!n) { bar.innerHTML = ""; bar.classList.remove("active"); return; }
     bar.classList.add("active");
-    const opt = (v, label) => '<option value="' + escapeAttr(v) + '">' + escapeHtml(label) + '</option>';
-    const pcts = [0, 10, 20, 25, 30, 40, 50, 60, 70, 75, 80, 90, 100];
     bar.innerHTML =
       '<span class="bulk-count">' + n + ' selected</span>' +
-      '<select class="bulk-set" data-bulk="status"><option value="">Set status…</option>' + COLUMNS.map((s) => '<option>' + escapeHtml(s) + '</option>').join('') + '</select>' +
-      '<select class="bulk-set" data-bulk="owner"><option value="">Set owner…</option>' + (State.config.Owners || []).map((o) => '<option>' + escapeHtml(o) + '</option>').join('') + '</select>' +
-      '<select class="bulk-set" data-bulk="workstream"><option value="">Set workstream…</option>' + (State.workstreams || []).map((w) => opt(w.WorkstreamID, w.Name || w.WorkstreamID)).join('') + '</select>' +
-      '<select class="bulk-set" data-bulk="goal"><option value="">Set goal…</option>' + (State.goals || []).map((g) => opt(g.GoalID, g.ShortName || g.GoalName || g.GoalID)).join('') + '</select>' +
-      '<select class="bulk-set" data-bulk="quarter"><option value="">Set quarter…</option>' + (State.config.Quarters || []).map((q) => '<option>' + escapeHtml(q) + '</option>').join('') + '</select>' +
-      '<select class="bulk-set" data-bulk="pct"><option value="">Set %…</option>' + pcts.map((p) => opt(String(p), p + '%')).join('') + '</select>' +
-      '<label class="bulk-date">Start <input type="date" class="bulk-date-input" data-bulk="startdate" /></label>' +
-      '<label class="bulk-date">Due <input type="date" class="bulk-date-input" data-bulk="duedate" /></label>' +
+      '<div class="bulk-edit-wrap">' +
+        '<button class="btn btn-secondary btn-sm" id="bulk-edit-btn">✎ Edit field ▾</button>' +
+        '<div class="bulk-edit-pop" id="bulk-edit-pop" hidden>' +
+          '<select id="bulk-field" class="filter">' +
+            '<option value="">Choose field…</option>' +
+            '<option value="status">Status</option>' +
+            '<option value="health">Health</option>' +
+            '<option value="owner">Owner</option>' +
+            '<option value="addcontrib">Add contributor</option>' +
+            '<option value="workstream">Workstream</option>' +
+            '<option value="goal">Goal</option>' +
+            '<option value="quarter">Quarter</option>' +
+            '<option value="pct">% complete</option>' +
+            '<option value="startdate">Start date</option>' +
+            '<option value="duedate">Due date</option>' +
+            '<option value="milestone">Milestone</option>' +
+          '</select>' +
+          '<div id="bulk-value" class="bulk-value"></div>' +
+          '<button class="btn btn-primary btn-sm" id="bulk-apply" disabled>Apply</button>' +
+        '</div>' +
+      '</div>' +
       '<button class="btn btn-secondary btn-sm" data-bulk="earlier" title="Pull in one quarter — completing sooner (logs Accelerated)">⏪ Accelerate</button>' +
       '<button class="btn btn-secondary btn-sm" data-bulk="later" title="Roll over one quarter — a slip (logs Delayed)">Delay ⏩</button>' +
       '<button class="btn btn-archive btn-sm" data-bulk="archive">Archive</button>' +
       '<button class="btn btn-secondary btn-sm" data-bulk="clear">Clear</button>';
-    Array.from(bar.querySelectorAll(".bulk-set")).forEach((sel) => {
-      sel.addEventListener("change", () => {
-        const kind = sel.dataset.bulk, val = sel.value;
-        sel.value = "";
-        if (val !== "") applyBulk(kind, val);
-      });
-    });
-    Array.from(bar.querySelectorAll(".bulk-date-input")).forEach((inp) => {
-      inp.addEventListener("change", () => {
-        const kind = inp.dataset.bulk, val = inp.value;
-        inp.value = "";
-        if (val) applyBulk(kind, val);
-      });
+
+    const editBtn = bar.querySelector("#bulk-edit-btn");
+    const pop = bar.querySelector("#bulk-edit-pop");
+    const fieldSel = bar.querySelector("#bulk-field");
+    const valWrap = bar.querySelector("#bulk-value");
+    const applyBtn = bar.querySelector("#bulk-apply");
+    editBtn.addEventListener("click", (e) => { e.stopPropagation(); pop.hidden = !pop.hidden; });
+    document.addEventListener("mousedown", (e) => { if (!pop.hidden && !bar.querySelector(".bulk-edit-wrap").contains(e.target)) pop.hidden = true; });
+    fieldSel.addEventListener("change", () => { renderBulkValue(fieldSel.value, valWrap); applyBtn.disabled = !fieldSel.value; });
+    applyBtn.addEventListener("click", () => {
+      const field = fieldSel.value; if (!field) return;
+      const ctrl = valWrap.querySelector("select, input");
+      const val = ctrl ? ctrl.value : "";
+      pop.hidden = true;
+      applyBulk(field, val);
     });
     bar.querySelector('[data-bulk="earlier"]').addEventListener("click", () => applyBulk("earlier"));
     bar.querySelector('[data-bulk="later"]').addEventListener("click", () => applyBulk("later"));
@@ -941,18 +955,42 @@
     bar.querySelector('[data-bulk="clear"]').addEventListener("click", () => { State.selected.clear(); renderList(); });
   }
 
+  // Build the value control for the chosen bulk field.
+  function renderBulkValue(field, wrap) {
+    const opt = (v, label, sel) => '<option value="' + escapeAttr(v) + '"' + (sel ? " selected" : "") + '>' + escapeHtml(label) + '</option>';
+    const sel = (opts) => '<select class="filter">' + opts + '</select>';
+    if (!field) { wrap.innerHTML = ""; return; }
+    switch (field) {
+      case "status": wrap.innerHTML = sel((State.config.Statuses || []).map((s) => opt(s, s)).join("")); break;
+      case "health": wrap.innerHTML = sel(opt("", "— clear —") + ["On Track", "At Risk", "Off Track"].map((h) => opt(h, h)).join("")); break;
+      case "owner":
+      case "addcontrib": wrap.innerHTML = sel((State.config.Owners || []).map((o) => opt(o, o)).join("")); break;
+      case "workstream": wrap.innerHTML = sel((State.workstreams || []).map((w) => opt(w.WorkstreamID, w.Name || w.WorkstreamID)).join("")); break;
+      case "goal": wrap.innerHTML = sel((State.goals || []).map((g) => opt(g.GoalID, g.ShortName || g.GoalName || g.GoalID)).join("")); break;
+      case "quarter": wrap.innerHTML = sel((State.config.Quarters || []).map((q) => opt(q, q)).join("")); break;
+      case "pct": wrap.innerHTML = sel([0, 10, 20, 25, 30, 40, 50, 60, 70, 75, 80, 90, 100].map((p) => opt(String(p), p + "%")).join("")); break;
+      case "milestone": wrap.innerHTML = sel(opt("Yes", "◆ Milestone") + opt("No", "Not a milestone")); break;
+      case "startdate":
+      case "duedate": wrap.innerHTML = '<input type="date" class="filter" />'; break;
+      default: wrap.innerHTML = "";
+    }
+  }
+
   async function applyBulk(kind, val) {
     const ids = Array.from(State.selected);
     if (!ids.length) return;
     const labels = {
       status: 'set status to "' + val + '"',
+      health: val ? 'set health to "' + val + '"' : "clear health",
       owner: 'set owner to "' + val + '"',
+      addcontrib: 'add contributor "' + val + '"',
       workstream: 'set workstream to "' + workstreamName(val) + '"',
       goal: 'set goal',
       quarter: 'set quarter to "' + val + '"',
       pct: 'set % complete to ' + val + '%',
       startdate: 'set start date to ' + val,
       duedate: 'set due date to ' + val,
+      milestone: val === "Yes" ? "mark as milestone" : "unmark milestone",
       earlier: 'accelerate one quarter (pull in)',
       later: 'delay one quarter (roll over)',
       archive: 'archive'
@@ -961,7 +999,7 @@
     if (!(await uiConfirm("Apply to " + ids.length + " task" + (ids.length === 1 ? "" : "s") + ": " + label + "?", { okText: "Apply" }))) return;
     toast("Updating " + ids.length + "…", "info");
     // Field-per-kind for the simple writeTask cases.
-    const FIELD = { owner: "Owner", workstream: "WorkstreamID", goal: "GoalID", quarter: "Quarter", pct: "PercentComplete", startdate: "StartDate", duedate: "DueDate" };
+    const FIELD = { owner: "Owner", health: "Health", workstream: "WorkstreamID", goal: "GoalID", quarter: "Quarter", pct: "PercentComplete", startdate: "StartDate", duedate: "DueDate", milestone: "IsMilestone" };
     let ok = 0, fail = 0;
     for (const id of ids) {
       try {
@@ -970,6 +1008,13 @@
         else if (kind === "earlier" || kind === "later") {
           const r = await rescheduleTask(id, kind);
           if (!r || r.error) { fail++; continue; }
+        }
+        else if (kind === "addcontrib") {
+          const task = State.tasks.find((x) => Number(x.TaskID) === Number(id));
+          const set = new Set(String(task && task.Contributors || "").split(/[;,]/).map((s) => s.trim()).filter(Boolean));
+          if (val && val !== (task && task.Owner)) set.add(val);
+          if (task) set.delete(task.Owner);
+          await window.WsjfData.writeTask({ TaskID: id, Contributors: Array.from(set).join("; ") }, { force: true });
         }
         else if (FIELD[kind]) {
           const value = kind === "pct" ? Number(val) : val;
@@ -1561,7 +1606,7 @@
               '<span class="rm-bar-fill" style="width:' + pct + '%"></span>' +
               '<span class="rm-bar-label">' + escapeHtml(t.Title || "") + '</span></div>';
         html += '<div class="rm-row" data-task-id="' + t.TaskID + '">' +
-          '<div class="rm-row-label" title="' + escapeAttr(t.Title) + '">' + (isM ? "◆ " : "") + rolloverBadge(t) + escapeHtml(t.Title || "") + '</div>' +
+          '<div class="rm-row-label" title="' + escapeAttr(t.Title) + '">' + (isM ? "◆ " : "") + scheduleChip(t) + escapeHtml(t.Title || "") + '</div>' +
           '<div class="rm-row-track">' + bar + '<div class="rm-today" style="left:' + todayPct + '%"></div></div></div>';
       });
     });
@@ -2100,6 +2145,22 @@
       e.target.textContent = (list.hidden ? "▸" : "▾") + " Activity";
     });
 
+    // Post an update (chronological note on the task)
+    document.getElementById("m-update-add").addEventListener("click", async () => {
+      const ta = document.getElementById("m-update-text");
+      const text = ta.value.trim();
+      if (!text) return;
+      if (!currentEditingTask || !currentEditingTask.TaskID) { toast("Save the task first, then add updates.", "warn"); return; }
+      try {
+        await window.WsjfData.createUpdate({ ParentType: "Task", ParentID: currentEditingTask.TaskID, Text: text });
+        ta.value = "";
+        renderUpdates(await window.WsjfData.readUpdatesForParent("Task", currentEditingTask.TaskID));
+        toast("Update posted.", "info");
+      } catch (e) {
+        toast("Couldn't post update — add an 'UpdatesTable' to the workbook. (" + e.message + ")", "error");
+      }
+    });
+
     // Tags input
     const tagInput = document.getElementById("m-tag-input");
     tagInput.addEventListener("keydown", handleTagKey);
@@ -2154,11 +2215,35 @@
       renderSubtasks();
       renderAttachments();
       renderActivity(acts);
+      renderUpdates([]);
+      loadUpdates(taskId);   // async; UpdatesTable may not exist yet
       showModal();
     } catch (err) {
       console.error(err);
       toast("Could not open task: " + err.message, "error");
     }
+  }
+
+  async function loadUpdates(taskId) {
+    try { renderUpdates(await window.WsjfData.readUpdatesForParent("Task", taskId)); }
+    catch (e) { renderUpdates([]); }   // no UpdatesTable → just show empty
+  }
+
+  function renderUpdates(list) {
+    const ul = document.getElementById("m-updates-list");
+    if (!ul) return;
+    ul.innerHTML = "";
+    if (!list || !list.length) { ul.innerHTML = '<div class="updates-empty">No updates yet.</div>'; }
+    else list.forEach((u) => {
+      const div = document.createElement("div");
+      div.className = "update-item";
+      div.innerHTML = '<div class="update-text">' + escapeHtml(u.Text || "") + '</div>' +
+        '<div class="update-meta">' + escapeHtml(u.AddedBy || "?") + ' · ' +
+        escapeHtml(formatDateShort(u.AddedDate)) + ' · ' + relTime(u.AddedDate) + '</div>';
+      ul.appendChild(div);
+    });
+    const c = document.getElementById("m-updates-count");
+    if (c) c.textContent = (list && list.length) ? "(" + list.length + ")" : "";
   }
 
   async function openCreateModal() {
@@ -2199,6 +2284,7 @@
     renderSubtasks();
     renderAttachments();
     renderActivity([]);
+    renderUpdates([]);
     showModal();
     setTimeout(() => document.getElementById("m-title").focus(), 50);
   }
@@ -2987,11 +3073,13 @@
     return String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-");
   }
 
-  // Roll-over indicator (PI planning): a task slipped to a later quarter at least
-  // net once. Driven by the optional Slips counter. Returns "" if not rolled over.
-  function rolloverBadge(t) {
+  // Schedule chip (PI planning): green » when net accelerated, red « when net
+  // delayed (rolled over). Driven by the optional signed Slips counter.
+  function scheduleChip(t) {
     const s = Number(t && t.Slips) || 0;
-    return s > 0 ? '<span class="rollover-badge" title="Delayed ' + s + ' quarter' + (s === 1 ? "" : "s") + ' (net)">↻ ' + s + '</span> ' : "";
+    if (s > 0) return '<span class="sched-chip sched-late" title="Delayed ' + s + ' quarter' + (s === 1 ? "" : "s") + ' (net)">« ' + s + '</span> ';
+    if (s < 0) return '<span class="sched-chip sched-early" title="Accelerated ' + (-s) + ' quarter' + (-s === 1 ? "" : "s") + ' (net)">» ' + (-s) + '</span> ';
+    return "";
   }
 
   function wsjfPillClass(v) {
@@ -3149,17 +3237,30 @@
 
     const updates = { TaskID: taskId, Quarter: newQ };
     // Shift dates by the gap between the two quarters' starts (keeps duration).
+    let delta = null;
     const oqd = State.quarterDates[oldQ], nqd = State.quarterDates[newQ];
     if (oqd && nqd && oqd.start && nqd.start) {
-      const delta = new Date(isoDate(nqd.start) + "T00:00:00").getTime() -
+      delta = new Date(isoDate(nqd.start) + "T00:00:00").getTime() -
         new Date(isoDate(oqd.start) + "T00:00:00").getTime();
       if (t.StartDate) updates.StartDate = shiftIso(t.StartDate, delta);
       if (t.DueDate) updates.DueDate = shiftIso(t.DueDate, delta);
     }
-    // Roll-over counter (optional Slips column): +1 slipping later, −1 pulling earlier.
-    updates.Slips = Math.max(0, (Number(t.Slips) || 0) + (dir === "later" ? 1 : -1));
+    // Net schedule counter (optional Slips column): +1 delayed (later), −1 accelerated
+    // (earlier). Signed: >0 net delayed, <0 net accelerated.
+    updates.Slips = (Number(t.Slips) || 0) + (dir === "later" ? 1 : -1);
 
     const ts = await window.WsjfData.writeTask(updates, { force: true, silent: true });
+    // Cascade the same shift to subtask due dates so they move with the task.
+    if (delta) {
+      const subs = State.subtasksByParent[taskId] || [];
+      for (const s of subs) {
+        if (s.SubtaskID && s.DueDate) {
+          const nd = shiftIso(s.DueDate, delta);
+          try { await window.WsjfData.writeSubtask({ SubtaskID: s.SubtaskID, DueDate: nd }); s.DueDate = nd; }
+          catch (_) {}
+        }
+      }
+    }
     const action = dir === "earlier" ? "Accelerated" : "Delayed";
     await window.WsjfData.logActivity("Task", taskId, action, "Quarter", oldQ, newQ, "");
 
@@ -3175,6 +3276,7 @@
     const t = new Date(iso).getTime();
     if (isNaN(t)) return String(iso);
     const s = Math.floor((Date.now() - t) / 1000);
+    if (s < 0)     return "just now";   // guard against clock skew / future stamps
     if (s < 60)    return s + "s ago";
     if (s < 3600)  return Math.floor(s / 60) + "m ago";
     if (s < 86400) return Math.floor(s / 3600) + "h ago";

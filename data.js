@@ -19,6 +19,7 @@
   const SUB_TABLE   = "SubtasksTable";
   const ATT_TABLE   = "AttachmentsTable";
   const LOG_TABLE   = "ActivityLogTable";
+  const UPD_TABLE   = "UpdatesTable";
   const CFG_SHEET   = "Config";
 
   // Next-ID is computed as MAX(existing id) + 1 straight from each table. This is
@@ -28,7 +29,8 @@
     Task:       { table: TASKS_TABLE, col: "TaskID" },
     Subtask:    { table: SUB_TABLE,   col: "SubtaskID" },
     Attachment: { table: ATT_TABLE,   col: "AttachmentID" },
-    Log:        { table: LOG_TABLE,   col: "LogID" }
+    Log:        { table: LOG_TABLE,   col: "LogID" },
+    Update:     { table: UPD_TABLE,   col: "UpdateID" }
   };
 
   // ────────────────────────────────────────────────────────────
@@ -489,6 +491,30 @@
   }
 
   // ────────────────────────────────────────────────────────────
+  // Updates — manual, chronological notes on a Task or Subtask.
+  // Requires an UpdatesTable: UpdateID, ParentType, ParentID, Text, AddedBy, AddedDate
+  // ────────────────────────────────────────────────────────────
+  async function readUpdatesForParent(parentType, parentId) {
+    const all = await _readTable(UPD_TABLE);
+    return all
+      .filter((u) => String(u.ParentType) === String(parentType) && Number(u.ParentID) === Number(parentId))
+      .sort((a, b) => String(a.AddedDate).localeCompare(String(b.AddedDate)));   // oldest → newest
+  }
+  async function createUpdate(obj) {
+    const me = await getCurrentUser();
+    const id = await _readAndBumpNextId("Update");
+    await _appendObjByHeaders(UPD_TABLE, {
+      UpdateID: id,
+      ParentType: obj.ParentType || "Task",
+      ParentID: obj.ParentID,
+      Text: obj.Text || "",
+      AddedBy: me.name,
+      AddedDate: _nowIso()
+    });
+    return id;
+  }
+
+  // ────────────────────────────────────────────────────────────
   // Activity Log
   // ────────────────────────────────────────────────────────────
   const LOG_HEADERS = ["LogID","Timestamp","EntityType","EntityID","Action","ChangedBy","FieldChanged","OldValue","NewValue","Notes"];
@@ -666,6 +692,8 @@
     readSubtasksForTask, readAttachmentsForTask, readActivityForTask,
     writeSubtask, createSubtask, deleteSubtask, toggleSubtask,
     writeAttachment, createAttachment, deleteAttachment,
+    // updates
+    readUpdatesForParent, createUpdate,
     // config (read)
     readConfigList,
     // config admin (write)
