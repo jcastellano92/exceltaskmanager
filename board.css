@@ -965,7 +965,7 @@ html, body {
 .rm-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
 .rm-head h2 { margin: 0; font-size: 18px; }
 .rm-scroll { overflow-x: auto; }
-.rm { min-width: 760px; background: #fff; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); overflow: hidden; }
+.rm { position: relative; min-width: 760px; background: #fff; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); overflow: hidden; }
 .rm-row { display: grid; grid-template-columns: 210px 1fr; align-items: center; height: 30px; border-bottom: 1px solid #f4f4f5; }
 .rm-row:hover { background: #fafafb; }
 .rm-row[data-task-id] { cursor: pointer; }
@@ -984,21 +984,75 @@ html, body {
 .rm-bar {
   position: absolute; top: 6px; height: 18px; border-radius: 4px;
   display: flex; align-items: center; overflow: hidden; min-width: 6px;
-  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.10);
+  cursor: grab; touch-action: none; z-index: 2;
 }
-.rm-bar-fill { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(0,0,0,0.18); }
-.rm-bar-label { position: relative; font-size: 10.5px; color: #fff; padding: 0 6px; white-space: nowrap; text-shadow: 0 1px 1px rgba(0,0,0,0.25); }
-.rm-bar-backlog     { background: #aeb4bd; }
-.rm-bar-on-track    { background: #3a9bff; }
-.rm-bar-in-progress { background: #5a78f0; }
-.rm-bar-blocked     { background: #e3604b; }
-.rm-bar-done        { background: #3bb273; }
-.rm-h-at-risk  { box-shadow: inset 0 0 0 2px #e0a100; }
-.rm-h-off-track{ box-shadow: inset 0 0 0 2px #CA001B; }
-.rm-ms { position: absolute; top: 3px; transform: translateX(-50%); color: #7a5cff; font-size: 16px; line-height: 22px; }
-.rm-today { position: absolute; top: 0; bottom: 0; width: 2px; background: #CA001B; opacity: 0.45; pointer-events: none; }
+.rm-bar:active, .rm-bar-dragging { cursor: grabbing; }
+.rm-bar-dragging { box-shadow: 0 2px 8px rgba(0,0,0,.25), inset 0 0 0 1px rgba(0,0,0,.1); opacity: .92; z-index: 5; }
+.rm-bar-fill { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(0,0,0,0.22); pointer-events: none; }
+.rm-bar-label { position: relative; font-size: 10.5px; color: #fff; padding: 0 6px; white-space: nowrap; text-shadow: 0 1px 1px rgba(0,0,0,0.35); pointer-events: none; }
+.rm-handle { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; z-index: 3; }
+.rm-handle-l { left: 0; } .rm-handle-r { right: 0; }
+.rm-handle::after { content: ""; position: absolute; top: 4px; bottom: 4px; width: 2px; background: rgba(255,255,255,.6); border-radius: 2px; }
+.rm-handle-l::after { left: 2px; } .rm-handle-r::after { right: 2px; }
+.rm-blocked { background-image: repeating-linear-gradient(45deg, rgba(255,255,255,.25) 0 4px, transparent 4px 8px); }
+.rm-h-at-risk  { outline: 2px solid #e0a100; outline-offset: -2px; }
+.rm-h-off-track{ outline: 2px solid #CA001B; outline-offset: -2px; }
+
+/* legacy status-coloured bars (no longer applied — bars colour by goal) */
+.rm-bar-backlog{background:#aeb4bd;} .rm-bar-on-track{background:#3a9bff;}
+.rm-bar-in-progress{background:#5a78f0;} .rm-bar-done{background:#3bb273;}
+
+.rm-today { position: absolute; top: 0; bottom: 0; width: 2px; background: #CA001B; opacity: 0.45; pointer-events: none; z-index: 1; }
 .rm-group { display: flex; justify-content: space-between; align-items: center; background: #f3f3f5; padding: 5px 10px; font-size: 12px; font-weight: 700; color: #333; }
 .rm-group-meta { font-weight: 600; color: #888; }
+
+/* Roadmap header controls + goal legend */
+.rm-head-right { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+.rm-toggle { font-size: 12px; color: #555; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.rm-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 0 0 8px; font-size: 11px; color: #555; }
+.rm-leg { display: inline-flex; align-items: center; gap: 5px; }
+.rm-leg i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+.rm-leg-hint { margin-left: auto; color: #aaa; font-style: italic; }
+
+/* Milestone vertical guide-lines (overlay) + lane */
+.rm-mslines { position: absolute; left: 210px; right: 0; top: 26px; bottom: 0; pointer-events: none; z-index: 0; }
+.rm-msline { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed #94a3b8; opacity: .5; }
+.rm-ms-row { height: 30px; background: #fcfcfd; }
+.rm-ms-rowlabel { font-weight: 700; color: #475569; display: flex; align-items: center; gap: 6px; }
+.rm-ms-add { border: 1px solid #d4d4d8; background: #fff; border-radius: 6px; width: 20px; height: 20px; line-height: 1; cursor: pointer; color: #555; font-weight: 700; padding: 0; }
+.rm-ms-add:hover { background: #f1f5f9; }
+.rm-ms-flag { position: absolute; top: 4px; transform: translateX(-2px); display: inline-flex; align-items: center; gap: 3px; cursor: pointer; z-index: 4; white-space: nowrap; }
+.rm-ms-diostamp { color: var(--mc, #7a5cff); font-size: 14px; line-height: 1; }
+.rm-ms-flaglabel { font-size: 10.5px; font-weight: 700; color: #334155; background: rgba(255,255,255,.85); padding: 0 4px; border-radius: 3px; }
+.rm-ms-flag:hover .rm-ms-flaglabel { background: #eef2ff; }
+.rm-ms-empty { position: absolute; left: 10px; top: 7px; font-size: 11px; color: #b0b0b8; font-style: italic; }
+
+/* Subtask lane (roadmap accordion) */
+.rm-caret { border: none; background: none; cursor: pointer; color: #888; font-size: 11px; padding: 0 2px; }
+.rm-subrow { height: 24px; background: #fbfcfe; }
+.rm-sublabel { font-size: 11px; color: #777; padding-left: 22px; }
+.rm-subbar { position: absolute; top: 9px; height: 6px; border-radius: 3px; background: #b9c2d0; z-index: 2; }
+.rm-subbar.done { background: #9ed3b4; }
+.rm-subdot { position: absolute; top: 6px; transform: translateX(-50%); width: 10px; height: 10px; border-radius: 50%; background: #6b7686; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.12); z-index: 3; }
+.rm-subdot.done { background: #3bb273; }
+
+/* Hover card + drag date tooltip */
+.rm-hovercard { position: fixed; z-index: 1000; width: 230px; background: #fff; border: 1px solid #e4e4e7; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.16); padding: 10px 12px; font-size: 12px; }
+.rm-hc-title { font-weight: 800; font-size: 13px; margin-bottom: 6px; color: #1f2937; }
+.rm-hc-row { display: flex; justify-content: space-between; gap: 10px; padding: 1px 0; color: #6b7280; }
+.rm-hc-row b { color: #1f2937; font-weight: 700; text-align: right; }
+.health-on-track-txt { color: #137a3e; } .health-at-risk-txt { color: #855900; } .health-off-track-txt { color: #b00020; }
+.rm-dragtip { position: fixed; z-index: 1001; background: #1f2937; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 6px; pointer-events: none; white-space: nowrap; }
+
+/* Milestone editor + multi-choice dialog */
+.confirm-title { margin: 0 0 10px; font-size: 16px; }
+.confirm-actions-col { flex-direction: column; align-items: stretch; gap: 8px; }
+.confirm-actions-col .btn { width: 100%; }
+.ms-editor { width: 420px; max-width: 92vw; text-align: left; }
+.ms-fl { display: block; font-size: 12px; font-weight: 700; color: #555; margin-bottom: 10px; }
+.ms-fl input, .ms-fl select { display: block; width: 100%; margin-top: 4px; font: inherit; padding: 8px 10px; border: 1px solid #d4d4d8; border-radius: 8px; }
+.ms-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
 /* Health dot + milestone marker on cards */
 .health-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }

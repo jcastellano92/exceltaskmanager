@@ -21,6 +21,8 @@
     quarterDates: {},                    // { Q1: {start, end}, … } from QuartersTable
     capacity: {},                        // { person: {availability, baseline} } from CapacityTable
     expandedSubtasks: new Set(),         // taskIds whose subtask checklist is expanded inline (board + list)
+    milestones: [],                      // standalone roadmap milestone lines (MilestonesTable)
+    roadmap: { showDates: true, expanded: new Set() }, // roadmap prefs: drag date tooltip + expanded subtask lanes
     selected: new Set(),                 // taskIds selected in List view for bulk actions
     sort: "wsjf",                        // board column sort: "wsjf" | "due" | "manual"
     groupBy: "",                         // List view grouping: "" | WorkstreamID | Owner | Quarter | Status | GoalID
@@ -104,7 +106,8 @@
       "countTasksByField", "countTasksByWorkstream", "countTasksByGoal",
       "renameOwner", "renameQuarter",
       "createWorkstream", "updateWorkstream", "deleteWorkstream",
-      "createGoal", "updateGoal", "deleteGoal", "logActivity"
+      "createGoal", "updateGoal", "deleteGoal", "logActivity",
+      "createMilestone", "updateMilestone", "deleteMilestone"
     ];
     const api = {};
     methods.forEach((m) => {
@@ -127,7 +130,8 @@
       "addConfigValue", "renameConfigValue", "deleteConfigValue",
       "renameOwner", "renameQuarter",
       "createWorkstream", "updateWorkstream", "deleteWorkstream",
-      "createGoal", "updateGoal", "deleteGoal"
+      "createGoal", "updateGoal", "deleteGoal",
+      "createMilestone", "updateMilestone", "deleteMilestone"
     ];
     let chain = Promise.resolve();
     mutating.forEach((m) => {
@@ -218,6 +222,11 @@
       qRows.forEach((r) => { if (r.Quarter) qd[r.Quarter] = { start: r.StartDate, end: r.EndDate }; });
       State.quarterDates = qd;
     } catch (e) { console.warn("QuartersTable dates unavailable:", e); }
+
+    // Standalone milestones (dated lines on the roadmap; optional table).
+    try {
+      State.milestones = await window.WsjfData._internal._readTable("MilestonesTable");
+    } catch (e) { State.milestones = []; }
 
     // Per-person capacity (availability dial + optional baseline override).
     try {
@@ -1584,6 +1593,7 @@
       if (isNaN(tt)) return 0;
       return Math.max(0, Math.min(100, ((tt - t0) / span) * 100));
     };
+    const isoFromPct = (p) => new Date(t0 + (Math.max(0, Math.min(100, p)) / 100) * span).toISOString().slice(0, 10);
     const todayPct = pctOf(new Date().toISOString().slice(0, 10));
 
     // A task's bar range — explicit dates, else the quarter's bounds.
@@ -1600,12 +1610,51 @@
       .filter((id) => visible.some((t) => t.WorkstreamID === id));
     if (visible.some((t) => !order.includes(t.WorkstreamID))) order.push("");
 
-    let html = '<div class="rm-head"><h2>Roadmap</h2><span class="mine-who">' +
-      visible.length + ' items · ' + escapeHtml(yearStart.slice(0, 4)) + '</span></div>';
+    // Goal legend (distinct colour per goal drives the bar colours).
+    const usedGoals = [];
+    visible.forEach((t) => taskGoalIds(t).forEach((g) => { if (!usedGoals.includes(g)) usedGoals.push(g); }));
+    const legend = usedGoals.map((g) =>
+      '<span class="rm-leg"><i style="background:' + goalColor(g) + '"></i>' + escapeHtml(goalShortName(g)) + '</span>').join("") +
+      '<span class="rm-leg"><i style="background:#cbd5e1"></i>No goal</span>';
+
+    let html = '<div class="rm-head"><h2>Roadmap</h2>' +
+      '<div class="rm-head-right">' +
+        '<label class="rm-toggle"><input type="checkbox" id="rm-show-dates"' + (State.roadmap.showDates ? " checked" : "") + '> Date tooltip on drag</label>' +
+        '<span class="mine-who">' + visible.length + ' items · ' + escapeHtml(yearStart.slice(0, 4)) + '</span>' +
+      '</div></div>';
+    html += '<div class="rm-legend">' + legend + '<span class="rm-leg-hint">Drag a bar to move it · drag its edges to resize · click to open</span></div>';
     html += '<div class="rm-scroll"><div class="rm">';
+
+    // Milestone vertical guide-lines spanning every track (overlay).
+    if (State.milestones && State.milestones.length) {
+      html += '<div class="rm-mslines">' + State.milestones.map((m) => {
+        const d = isoDate(m.Date); if (!d) return "";
+        return '<div class="rm-msline" style="left:' + pctOf(d) + '%;border-color:' + (m.Color || goalColor(m.GoalID)) + '"></div>';
+      }).join("") + '</div>';
+    }
+
+    // Axis (quarter columns + today).
     html += '<div class="rm-row rm-axis-row"><div class="rm-row-label"></div><div class="rm-row-track rm-axis-track">' +
       ["Q1", "Q2", "Q3", "Q4"].map((q) => '<span class="rm-qcol">' + q + '</span>').join("") +
       '<div class="rm-today" style="left:' + todayPct + '%" title="Today"></div></div></div>';
+
+    // Milestone lane (dated diamonds + labels).
+    if (State.milestones && State.milestones.length) {
+      const flags = State.milestones.slice()
+        .sort((a, b) => (isoDate(a.Date) < isoDate(b.Date) ? -1 : 1))
+        .map((m) => {
+          const d = isoDate(m.Date); if (!d) return "";
+          const col = m.Color || goalColor(m.GoalID);
+          return '<div class="rm-ms-flag" style="left:' + pctOf(d) + '%;--mc:' + col + '" data-ms-id="' + escapeAttr(m.MilestoneID) +
+            '" title="' + escapeAttr((m.Title || "Milestone") + " · " + formatDateShort(d) + (m.Notes ? " · " + m.Notes : "")) + '">' +
+            '<span class="rm-ms-diostamp">◆</span><span class="rm-ms-flaglabel">' + escapeHtml(m.Title || "") + '</span></div>';
+        }).join("");
+      html += '<div class="rm-row rm-ms-row"><div class="rm-row-label rm-ms-rowlabel">◆ Milestones <button class="rm-ms-add" id="rm-add-ms" title="Add milestone">＋</button></div>' +
+        '<div class="rm-row-track">' + flags + '<div class="rm-today" style="left:' + todayPct + '%"></div></div></div>';
+    } else {
+      html += '<div class="rm-row rm-ms-row"><div class="rm-row-label rm-ms-rowlabel">◆ Milestones <button class="rm-ms-add" id="rm-add-ms" title="Add milestone">＋</button></div>' +
+        '<div class="rm-row-track"><span class="rm-ms-empty">No milestones — add a dated line</span><div class="rm-today" style="left:' + todayPct + '%"></div></div></div>';
+    }
 
     let any = false;
     order.forEach((wid) => {
@@ -1621,26 +1670,290 @@
         const r = rng(t);
         const left = pctOf(r.s), width = Math.max(1.5, pctOf(r.e) - left);
         const pct = Math.max(0, Math.min(100, Number(t.PercentComplete) || 0));
-        const isM = String(t.IsMilestone).toLowerCase() === "yes";
+        const gc = goalColor(taskGoalIds(t)[0] || "");
         const hl = t.Health ? " rm-h-" + statusSlug(t.Health) : "";
-        const tip = escapeAttr(t.Title + " · " + (t.StartDate ? formatDateShort(t.StartDate) : "?") +
-          "–" + (t.DueDate ? formatDateShort(t.DueDate) : "?") + " · " + pct + "% · " + (t.Status || ""));
-        const bar = isM
-          ? '<div class="rm-ms" style="left:' + pctOf(r.e) + '%" title="' + tip + '">◆</div>'
-          : '<div class="rm-bar rm-bar-' + statusSlug(t.Status) + hl + '" style="left:' + left + '%;width:' + width + '%" title="' + tip + '">' +
-              '<span class="rm-bar-fill" style="width:' + pct + '%"></span>' +
-              '<span class="rm-bar-label">' + escapeHtml(t.Title || "") + '</span></div>';
+        const blocked = t.Status === "Blocked" ? " rm-blocked" : "";
+        const subs = State.subtasksByParent[t.TaskID] || [];
+        const expanded = State.roadmap.expanded.has(Number(t.TaskID));
+        const caret = subs.length
+          ? '<button class="rm-caret" data-rm-exp="' + t.TaskID + '" title="Subtasks">' + (expanded ? "▾" : "▸") + '</button> '
+          : '';
+        const bar = '<div class="rm-bar' + hl + blocked + '" style="left:' + left + '%;width:' + width + '%;background:' + gc + '" data-task-id="' + t.TaskID + '">' +
+          '<span class="rm-handle rm-handle-l" data-grip="l"></span>' +
+          '<span class="rm-bar-fill" style="width:' + pct + '%"></span>' +
+          '<span class="rm-bar-label">' + escapeHtml(t.Title || "") + '</span>' +
+          '<span class="rm-handle rm-handle-r" data-grip="r"></span></div>';
         html += '<div class="rm-row" data-task-id="' + t.TaskID + '">' +
-          '<div class="rm-row-label" title="' + escapeAttr(t.Title) + '">' + (isM ? "◆ " : "") + scheduleChip(t) + escapeHtml(t.Title || "") + '</div>' +
+          '<div class="rm-row-label" title="' + escapeAttr(t.Title) + '">' + caret + scheduleChip(t) + escapeHtml(t.Title || "") + '</div>' +
           '<div class="rm-row-track">' + bar + '<div class="rm-today" style="left:' + todayPct + '%"></div></div></div>';
+
+        // Subtask lane (accordion) — thin bars from parent start to each subtask due.
+        if (expanded) {
+          subs.slice().sort((a, b) => (Number(a.Order) || 0) - (Number(b.Order) || 0)).forEach((s) => {
+            const done2 = String(s.Done).toLowerCase() === "yes";
+            const due = isoDate(s.DueDate);
+            const sl = left;
+            const sr = due ? pctOf(due) : pctOf(r.e);
+            const sw = Math.max(1.2, sr - sl);
+            const stip = escapeAttr((s.Text || "Subtask") + (due ? " · due " + formatDateShort(due) : "") + (done2 ? " · done" : ""));
+            html += '<div class="rm-row rm-subrow"><div class="rm-row-label rm-sublabel" title="' + escapeAttr(s.Text || "") + '">↳ ' +
+              escapeHtml(s.Text || "") + '</div><div class="rm-row-track">' +
+              '<div class="rm-subbar' + (done2 ? " done" : "") + '" style="left:' + sl + '%;width:' + sw + '%" title="' + stip + '"></div>' +
+              '<div class="rm-subdot' + (done2 ? " done" : "") + '" style="left:' + sr + '%" title="' + stip + '"></div>' +
+              '<div class="rm-today" style="left:' + todayPct + '%"></div></div></div>';
+          });
+        }
       });
     });
     html += '</div></div>';
-    if (!any) html += '<div class="mine-empty">No items match your filters.</div>';
+    if (!any) html += '<div class="mine-empty">No items match your filters. Milestones still show above.</div>';
+    html += '<div class="rm-hovercard" id="rm-hovercard" hidden></div>';
+    html += '<div class="rm-dragtip" id="rm-dragtip" hidden></div>';
     root.innerHTML = html;
-    Array.from(root.querySelectorAll(".rm-row[data-task-id]")).forEach((row) => {
-      row.addEventListener("click", () => openEditModal(Number(row.dataset.taskId)));
+
+    // Date-tooltip toggle.
+    const showDatesCb = document.getElementById("rm-show-dates");
+    if (showDatesCb) showDatesCb.addEventListener("change", () => { State.roadmap.showDates = showDatesCb.checked; });
+
+    // Add-milestone button.
+    const addMs = document.getElementById("rm-add-ms");
+    if (addMs) addMs.addEventListener("click", (e) => { e.stopPropagation(); openMilestoneEditor(null); });
+    Array.from(root.querySelectorAll(".rm-ms-flag[data-ms-id]")).forEach((f) => {
+      f.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const m = (State.milestones || []).find((x) => String(x.MilestoneID) === String(f.dataset.msId));
+        if (m) openMilestoneEditor(m);
+      });
     });
+
+    // Row label click → open modal (track clicks are for dragging).
+    Array.from(root.querySelectorAll(".rm-row[data-task-id] .rm-row-label")).forEach((lab) => {
+      lab.addEventListener("click", (e) => {
+        if (e.target.closest(".rm-caret")) return;
+        openEditModal(Number(lab.closest(".rm-row").dataset.taskId));
+      });
+    });
+    // Subtask accordion carets.
+    Array.from(root.querySelectorAll(".rm-caret[data-rm-exp]")).forEach((b) => {
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const id = Number(b.dataset.rmExp);
+        if (State.roadmap.expanded.has(id)) State.roadmap.expanded.delete(id);
+        else State.roadmap.expanded.add(id);
+        renderRoadmap();
+      });
+    });
+    // Bars: hover card + drag/resize.
+    Array.from(root.querySelectorAll(".rm-bar[data-task-id]")).forEach((bar) => {
+      const task = State.tasks.find((x) => Number(x.TaskID) === Number(bar.dataset.taskId));
+      if (!task) return;
+      wireRoadmapHover(bar, task);
+      wireRoadmapDrag(bar, task, { pctOf: pctOf, isoFromPct: isoFromPct });
+    });
+  }
+
+  // Hover card with the full task detail (the bar label truncates).
+  function wireRoadmapHover(bar, task) {
+    const card = document.getElementById("rm-hovercard");
+    if (!card) return;
+    bar.addEventListener("mouseenter", () => {
+      if (State._rmDragging) return;
+      const owner = String(task.Owner || "").trim();
+      const goals = taskGoalIds(task).map(goalShortName).join(", ") || "—";
+      const pct = Math.max(0, Math.min(100, Number(task.PercentComplete) || 0));
+      card.innerHTML =
+        '<div class="rm-hc-title">' + escapeHtml(task.Title || "") + '</div>' +
+        '<div class="rm-hc-row"><span>Dates</span><b>' + (task.StartDate ? formatDateShort(task.StartDate) : "?") + ' – ' + (task.DueDate ? formatDateShort(task.DueDate) : "?") + '</b></div>' +
+        '<div class="rm-hc-row"><span>Quarter</span><b>' + escapeHtml(task.Quarter || "—") + '</b></div>' +
+        '<div class="rm-hc-row"><span>Status</span><b>' + escapeHtml(task.Status || "—") + '</b></div>' +
+        (task.Health ? '<div class="rm-hc-row"><span>Health</span><b class="health-' + statusSlug(task.Health) + '-txt">' + escapeHtml(task.Health) + '</b></div>' : "") +
+        '<div class="rm-hc-row"><span>Owner</span><b>' + escapeHtml(owner || "—") + '</b></div>' +
+        '<div class="rm-hc-row"><span>Goals</span><b>' + escapeHtml(goals) + '</b></div>' +
+        '<div class="rm-hc-row"><span>Progress</span><b>' + pct + '%</b></div>';
+      card.hidden = false;
+      const r = bar.getBoundingClientRect();
+      const top = r.bottom + 8;
+      card.style.top = Math.min(top, window.innerHeight - 180) + "px";
+      card.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 250)) + "px";
+    });
+    bar.addEventListener("mouseleave", () => { card.hidden = true; });
+  }
+
+  // Drag a bar to move it, or its edges to resize — live, with an optional date
+  // tooltip. On drop, commit the new dates (and prompt on a quarter change).
+  function wireRoadmapDrag(bar, task, ctx) {
+    bar.addEventListener("pointerdown", (ev) => {
+      if (ev.button !== 0) return;
+      ev.preventDefault();
+      const grip = ev.target.closest(".rm-handle");
+      const mode = grip ? (grip.dataset.grip === "l" ? "resize-l" : "resize-r") : "move";
+      const track = bar.parentElement;
+      const trackW = track.getBoundingClientRect().width;
+      const startX = ev.clientX;
+      const left0 = parseFloat(bar.style.left) || 0;
+      const width0 = parseFloat(bar.style.width) || 1;
+      let moved = false;
+      State._rmDragging = false;
+      const tip = document.getElementById("rm-dragtip");
+      const card = document.getElementById("rm-hovercard"); if (card) card.hidden = true;
+      bar.classList.add("rm-bar-dragging");
+
+      function onMove(e) {
+        const dPx = e.clientX - startX;
+        if (Math.abs(dPx) > 3) { moved = true; State._rmDragging = true; }
+        const dPct = (dPx / trackW) * 100;
+        let nl = left0, nw = width0;
+        if (mode === "move") { nl = Math.max(0, Math.min(100 - width0, left0 + dPct)); }
+        else if (mode === "resize-l") { nl = Math.max(0, Math.min(left0 + width0 - 1, left0 + dPct)); nw = (left0 + width0) - nl; }
+        else { nw = Math.max(1, Math.min(100 - left0, width0 + dPct)); }
+        bar.style.left = nl + "%"; bar.style.width = nw + "%";
+        if (State.roadmap.showDates && tip) {
+          const ns = ctx.isoFromPct(nl), ne = ctx.isoFromPct(nl + nw);
+          tip.textContent = formatDateShort(ns) + " – " + formatDateShort(ne);
+          tip.hidden = false;
+          tip.style.top = (e.clientY - 34) + "px";
+          tip.style.left = Math.min(e.clientX + 12, window.innerWidth - 130) + "px";
+        }
+      }
+      function onUp() {
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", onUp);
+        bar.classList.remove("rm-bar-dragging");
+        if (tip) tip.hidden = true;
+        const nl = parseFloat(bar.style.left) || 0, nw = parseFloat(bar.style.width) || 1;
+        setTimeout(() => { State._rmDragging = false; }, 0);   // let the click handler see it
+        if (!moved) return;                                    // a plain click — row-label handler opens modal
+        commitRoadmapDates(task, ctx.isoFromPct(nl), ctx.isoFromPct(nl + nw));
+      }
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onUp);
+    });
+  }
+
+  // Persist new roadmap dates. Prompts (Accelerated / Delayed / just move) when an
+  // in-progress task changes quarter; cascades the shift to subtask due dates.
+  async function commitRoadmapDates(task, ns, ne) {
+    if (ne < ns) { const tmp = ns; ns = ne; ne = tmp; }
+    const oldStart = isoDate(task.StartDate) || isoDate(task.DueDate) || ns;
+    const oldQ = task.Quarter;
+    const newQ = quarterOf(ns);
+    const deltaMs = new Date(ns + "T00:00:00").getTime() - new Date(oldStart + "T00:00:00").getTime();
+    const order = ["Q1", "Q2", "Q3", "Q4"];
+    const movable = task.Status !== "Backlog" && task.Status !== "Done";
+    let slipsDelta = 0, action = null;
+
+    if (newQ && oldQ && newQ !== oldQ && movable) {
+      const fwd = order.indexOf(newQ) > order.indexOf(oldQ);
+      const choice = await uiChoose(
+        "Moved " + oldQ + " → " + newQ,
+        "This in-progress item changed quarter. How should it be logged?",
+        [
+          fwd ? { value: "delay", label: "⏩ Delayed — a slip (roll-over)", cls: "btn-loss" }
+              : { value: "accel", label: "⏪ Accelerated — a win (pulled in)", cls: "btn-win" },
+          { value: "move", label: "Just move it — no schedule flag", cls: "btn-secondary" }
+        ]
+      );
+      if (choice === null) { renderRoadmap(); return; }     // cancelled → snap back
+      if (choice === "delay") { slipsDelta = 1; action = "Delayed"; }
+      else if (choice === "accel") { slipsDelta = -1; action = "Accelerated"; }
+    }
+
+    const updates = { TaskID: task.TaskID, StartDate: ns, DueDate: ne };
+    if (newQ) updates.Quarter = newQ;
+    if (slipsDelta) updates.Slips = (Number(task.Slips) || 0) + slipsDelta;
+    // optimistic local mirror
+    task.StartDate = ns; task.DueDate = ne;
+    if (newQ) task.Quarter = newQ;
+    if (slipsDelta) task.Slips = (Number(task.Slips) || 0) + slipsDelta;
+
+    try {
+      await window.WsjfData.writeTask(updates, { force: true, silent: true });
+      if (deltaMs) {
+        const subs = State.subtasksByParent[task.TaskID] || [];
+        for (const s of subs) {
+          if (s.SubtaskID && s.DueDate) {
+            const nd = shiftIso(s.DueDate, deltaMs);
+            try { await window.WsjfData.writeSubtask({ SubtaskID: s.SubtaskID, DueDate: nd }); s.DueDate = nd; } catch (_) {}
+          }
+        }
+      }
+      if (action) { try { await window.WsjfData.logActivity("Task", task.TaskID, action, "Quarter", oldQ, newQ, ""); } catch (_) {} }
+      State.lastSyncTs = Date.now(); updateSyncLabel();
+      toast((action ? action + ": " : "Rescheduled: ") + formatDateShort(ns) + " – " + formatDateShort(ne) +
+        (newQ && newQ !== oldQ ? " (" + newQ + ")" : ""), "info");
+    } catch (e) {
+      toast("Save failed: " + e.message + " — reverting.", "error");
+      await reloadTasks();
+    }
+    renderRoadmap();
+  }
+
+  async function reloadMilestones() {
+    try { State.milestones = await window.WsjfData._internal._readTable("MilestonesTable"); }
+    catch (e) { State.milestones = []; }
+  }
+
+  // Create/edit a standalone milestone (a dated line on the roadmap — NOT a task).
+  function openMilestoneEditor(m) {
+    const isNew = !m;
+    m = m || {};
+    const host = document.createElement("div");
+    host.className = "confirm-overlay";
+    const box = document.createElement("div");
+    box.className = "confirm-box ms-editor";
+    const goalOpts = '<option value="">— no goal —</option>' +
+      State.goals.map((g) => '<option value="' + escapeAttr(g.GoalID) + '"' +
+        (String(m.GoalID) === String(g.GoalID) ? " selected" : "") + '>' +
+        escapeHtml(g.ShortName || g.GoalName || g.GoalID) + '</option>').join("");
+    box.innerHTML =
+      '<h3 class="confirm-title">' + (isNew ? "Add milestone" : "Edit milestone") + '</h3>' +
+      '<label class="ms-fl">Title<input id="ms-title" type="text" value="' + escapeAttr(m.Title || "") + '" placeholder="e.g. Beta launch" /></label>' +
+      '<div class="ms-two">' +
+        '<label class="ms-fl">Date<input id="ms-date" type="date" value="' + escapeAttr(isoDate(m.Date) || "") + '" /></label>' +
+        '<label class="ms-fl">Goal<select id="ms-goal">' + goalOpts + '</select></label>' +
+      '</div>' +
+      '<label class="ms-fl">Notes<input id="ms-notes" type="text" value="' + escapeAttr(m.Notes || "") + '" placeholder="optional" /></label>' +
+      '<div class="confirm-actions">' +
+        (isNew ? "" : '<button class="btn btn-archive" id="ms-del">Delete</button>') +
+        '<span style="flex:1"></span>' +
+        '<button class="btn btn-secondary" id="ms-cancel">Cancel</button>' +
+        '<button class="btn btn-primary" id="ms-save">Save</button>' +
+      '</div>';
+    host.appendChild(box);
+    document.body.appendChild(host);
+    function close() { host.remove(); }
+    host.addEventListener("click", (e) => { if (e.target === host) close(); });
+    box.querySelector("#ms-cancel").addEventListener("click", close);
+    const delBtn = box.querySelector("#ms-del");
+    if (delBtn) delBtn.addEventListener("click", async () => {
+      if (!(await uiConfirm('Delete milestone "' + (m.Title || "") + '"?', { okText: "Delete" }))) return;
+      try { await window.WsjfData.deleteMilestone(m.MilestoneID); await reloadMilestones(); renderRoadmap(); toast("Milestone deleted.", "info"); close(); }
+      catch (e) { toast("Delete failed: " + e.message, "error"); }
+    });
+    box.querySelector("#ms-save").addEventListener("click", async () => {
+      const fields = {
+        Title: box.querySelector("#ms-title").value.trim(),
+        Date: box.querySelector("#ms-date").value,
+        GoalID: box.querySelector("#ms-goal").value,
+        Notes: box.querySelector("#ms-notes").value.trim()
+      };
+      if (!fields.Title) { toast("Title is required.", "warn"); return; }
+      if (!fields.Date) { toast("Date is required.", "warn"); return; }
+      fields.Quarter = quarterOf(fields.Date);
+      const saveBtn = box.querySelector("#ms-save"); saveBtn.disabled = true; saveBtn.textContent = "Saving…";
+      try {
+        if (isNew) await window.WsjfData.createMilestone(fields);
+        else await window.WsjfData.updateMilestone(m.MilestoneID, fields);
+        await reloadMilestones();
+        renderRoadmap();
+        toast("Milestone saved.", "info");
+        close();
+      } catch (e) {
+        saveBtn.disabled = false; saveBtn.textContent = "Save";
+        toast("Save failed: " + e.message, "error");
+      }
+    });
+    setTimeout(() => { const ti = box.querySelector("#ms-title"); if (ti) ti.focus(); }, 0);
   }
 
   // ───── Config screen ─────
@@ -3498,6 +3811,51 @@
   // ───── Confirm dialog ─────
   // Native confirm()/alert() are blocked inside Office dialogs (sandboxed iframe),
   // so use a custom DOM-based confirm that works everywhere. Returns a Promise<boolean>.
+  // Multi-choice dialog. choices = [{ value, label, cls }]. Resolves chosen value
+  // (or null on cancel). Used by the roadmap cross-quarter drop prompt.
+  function uiChoose(title, message, choices) {
+    return new Promise((resolve) => {
+      const host = document.createElement("div");
+      host.className = "confirm-overlay";
+      const box = document.createElement("div");
+      box.className = "confirm-box";
+      box.innerHTML = '<h3 class="confirm-title">' + escapeHtml(title) + '</h3>' +
+        (message ? '<p class="confirm-msg">' + escapeHtml(message) + '</p>' : "");
+      const actions = document.createElement("div");
+      actions.className = "confirm-actions confirm-actions-col";
+      function done(val) { host.remove(); resolve(val); }
+      choices.forEach((c) => {
+        const b = document.createElement("button");
+        b.className = "btn " + (c.cls || "btn-secondary");
+        b.textContent = c.label;
+        b.addEventListener("click", () => done(c.value));
+        actions.appendChild(b);
+      });
+      const cancel = document.createElement("button");
+      cancel.className = "btn btn-link";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", () => done(null));
+      actions.appendChild(cancel);
+      box.appendChild(actions);
+      host.appendChild(box);
+      host.addEventListener("click", (e) => { if (e.target === host) done(null); });
+      document.body.appendChild(host);
+    });
+  }
+
+  // Which quarter does an ISO date fall in? Prefers QuartersTable bounds, else month.
+  function quarterOf(iso) {
+    const d = isoDate(iso);
+    if (!d) return "";
+    const qd = State.quarterDates || {};
+    for (const q of Object.keys(qd)) {
+      const s = isoDate(qd[q].start), e = isoDate(qd[q].end);
+      if (s && e && d >= s && d <= e) return q;
+    }
+    const m = Number(d.slice(5, 7));
+    return m <= 3 ? "Q1" : m <= 6 ? "Q2" : m <= 9 ? "Q3" : "Q4";
+  }
+
   function uiConfirm(message, opts) {
     opts = opts || {};
     return new Promise((resolve) => {
