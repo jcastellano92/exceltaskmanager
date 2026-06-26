@@ -390,10 +390,7 @@
     const pct  = Math.max(0, Math.min(100, Number(task.PercentComplete) || 0));
     const wsjfClass = wsjfPillClass(wsjf);
 
-    const owners = String(task.Owner || "").split(";").map((s) => s.trim()).filter(Boolean);
-    const ownerHtml = owners.slice(0, 3).map((o) =>
-      `<span class="avatar" style="background:${colorHash(o)}" title="${escapeAttr(o)}">${initialsFromName(o)}</span>`
-    ).join("");
+    const ownerHtml = peopleAvatars(task, 4);
 
     const wsName = workstreamName(task.WorkstreamID);
     const wsColor = colorHash(task.WorkstreamID || "");
@@ -405,6 +402,7 @@
     const attCount = Number(task.AttachmentCount) || (State.attsByParent[task.TaskID] || []).length;
     const health = task.Health || "";
     const healthDot = health ? `<span class="health-dot health-${statusSlug(health)}" title="${escapeAttr(health)}"></span>` : "";
+    if (health) el.classList.add("khealth-" + statusSlug(health));   // left-edge accent
 
     el.innerHTML = `
       <div class="kcard-head">
@@ -415,6 +413,7 @@
       <div class="kcard-meta">
         <div class="avatars">${ownerHtml}</div>
         <span class="ws-pill" style="background:${wsColor}">${escapeHtml(wsName)}</span>
+        ${goalDotsHtml(task)}
         <span class="q-badge">${escapeHtml(task.Quarter || "")}</span>
       </div>
       <div class="kcard-foot">
@@ -633,8 +632,10 @@
   const LIST_COLS = [
     { key: "Title",           label: "Title" },
     { key: "Status",          label: "Status" },
+    { key: "Health",          label: "Health" },
     { key: "Owner",           label: "Owner" },
     { key: "WorkstreamID",    label: "Workstream" },
+    { key: "GoalID",          label: "Goal" },
     { key: "Quarter",         label: "Quarter" },
     { key: "WSJF",            label: "WSJF", num: true },
     { key: "DueDate",         label: "Due" },
@@ -645,6 +646,8 @@
   function listCellValue(t, key) {
     switch (key) {
       case "WorkstreamID":    return workstreamName(t.WorkstreamID);
+      case "GoalID":          return taskGoalIds(t).map(goalShortName).join(", ");
+      case "Health":          return String(t.Health || "");
       case "WSJF":            return (Number(t.WSJF) || 0).toFixed(1);
       case "PercentComplete": return (Math.max(0, Math.min(100, Number(t.PercentComplete) || 0))) + "%";
       case "DueDate":         return t.DueDate ? formatDateShort(t.DueDate) : "";
@@ -672,12 +675,29 @@
     const caret = subs.length
       ? '<button class="row-expand" data-exp="' + t.TaskID + '" title="Subtasks">' + (expanded ? "▾" : "▸") + '</button> '
       : '';
+    const health = String(t.Health || "");
+    const healthCell = health
+      ? '<span class="health-chip health-' + statusSlug(health) + '"><i class="health-dot health-' + statusSlug(health) + '"></i>' + escapeHtml(health) + '</span>'
+      : '<span class="muted">—</span>';
+    const goalIds = taskGoalIds(t);
+    const goalCell = goalIds.length
+      ? '<span class="list-goals">' + goalIds.map((gid) =>
+          '<span class="goal-pill" style="background:' + goalColor(gid) + '22;border-color:' + goalColor(gid) + '">' +
+          '<i class="goal-dot" style="background:' + goalColor(gid) + '"></i>' + escapeHtml(goalShortName(gid)) + '</span>').join("")
+        + '</span>'
+      : '<span class="muted">—</span>';
+    const ownerName = String(t.Owner || "").trim();
+    const ownerCell = ownerName
+      ? '<span class="owner-cell"><span class="avatar avatar-sm avatar-owner" style="background:' + colorHash(ownerName) + '">' + initialsFromName(ownerName) + '</span>' + escapeHtml(ownerName) + '</span>'
+      : '<span class="muted">—</span>';
     let h = '<tr data-task-id="' + t.TaskID + '">' +
       '<td class="sel-col"><input type="checkbox" class="sel-row" data-id="' + t.TaskID + '"' + (State.selected.has(Number(t.TaskID)) ? " checked" : "") + ' /></td>' +
       '<td class="list-title">' + caret + scheduleChip(t) + escapeHtml(t.Title || "") + '</td>' +
       '<td><span class="status-chip status-' + statusSlug(t.Status) + '">' + escapeHtml(t.Status || "") + '</span></td>' +
-      '<td>' + escapeHtml(t.Owner || "") + '</td>' +
+      '<td>' + healthCell + '</td>' +
+      '<td>' + ownerCell + '</td>' +
       '<td>' + escapeHtml(workstreamName(t.WorkstreamID)) + '</td>' +
+      '<td>' + goalCell + '</td>' +
       '<td>' + escapeHtml(t.Quarter || "") + '</td>' +
       '<td class="num"><span class="wsjf-pill ' + wsjfPillClass(wsjf) + '">' + wsjf.toFixed(1) + '</span></td>' +
       '<td>' + escapeHtml(t.DueDate ? formatDateShort(t.DueDate) : "") + '</td>' +
@@ -1041,6 +1061,12 @@
     }
     let av = a[k], bv = b[k];
     if (k === "WorkstreamID") { av = workstreamName(av); bv = workstreamName(bv); }
+    else if (k === "GoalID") { av = taskGoalIds(a).map(goalShortName).join(", "); bv = taskGoalIds(b).map(goalShortName).join(", "); }
+    else if (k === "Health") {
+      // order by severity, not alphabet: Off Track → At Risk → On Track → (none)
+      const rank = { "Off Track": 0, "At Risk": 1, "On Track": 2, "": 3 };
+      return ((rank[String(a.Health || "")] ?? 3) - (rank[String(b.Health || "")] ?? 3)) * dir;
+    }
     return String(av || "").localeCompare(String(bv || "")) * dir;
   }
 
@@ -3145,6 +3171,54 @@
   function workstreamName(id) {
     const w = State.workstreams.find((x) => x.WorkstreamID === id);
     return w ? (w.Name || w.WorkstreamID) : (id || "—");
+  }
+
+  // ───── Goal helpers (distinct colour per goal, used on cards + roadmap) ─────
+  const GOAL_PALETTE = ["#6366f1", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444",
+                        "#ec4899", "#8b5cf6", "#14b8a6", "#f97316", "#64748b"];
+  function goalColor(goalId) {
+    if (!goalId) return "#cbd5e1";
+    const idx = State.goals.findIndex((g) => String(g.GoalID) === String(goalId));
+    return idx >= 0 ? GOAL_PALETTE[idx % GOAL_PALETTE.length] : colorHash(goalId);
+  }
+  function goalShortName(goalId) {
+    const g = State.goals.find((x) => String(x.GoalID) === String(goalId));
+    return g ? (g.ShortName || g.GoalName || g.GoalID) : goalId;
+  }
+  function taskGoalIds(t) {
+    return String(t.GoalID || "").split(/[;,]/).map((s) => s.trim()).filter(Boolean);
+  }
+
+  // Owner + contributor avatars (owner first, ringed). Used on board + list.
+  function peopleAvatars(task, max) {
+    max = max || 4;
+    const owner = String(task.Owner || "").trim();
+    const contribs = String(task.Contributors || "").split(/[;,]/)
+      .map((s) => s.trim()).filter(Boolean).filter((c) => c !== owner);
+    const people = [];
+    if (owner) people.push({ name: owner, owner: true });
+    contribs.forEach((c) => people.push({ name: c, owner: false }));
+    const shown = people.slice(0, max);
+    const extra = people.length - shown.length;
+    let h = shown.map((p) =>
+      '<span class="avatar' + (p.owner ? " avatar-owner" : "") + '" style="background:' +
+      colorHash(p.name) + '" title="' + escapeAttr(p.name + (p.owner ? " · owner" : " · contributor")) +
+      '">' + initialsFromName(p.name) + '</span>'
+    ).join("");
+    if (extra > 0) {
+      h += '<span class="avatar avatar-more" title="' +
+        escapeAttr(people.slice(max).map((p) => p.name).join(", ")) + '">+' + extra + '</span>';
+    }
+    return h;
+  }
+
+  // Goal colour dots (one per goal the task serves).
+  function goalDotsHtml(task) {
+    const ids = taskGoalIds(task);
+    if (!ids.length) return "";
+    return '<span class="goal-dots">' + ids.map((gid) =>
+      '<span class="goal-dot" style="background:' + goalColor(gid) +
+      '" title="' + escapeAttr(goalShortName(gid)) + '"></span>').join("") + '</span>';
   }
 
   function attIcon(type) {

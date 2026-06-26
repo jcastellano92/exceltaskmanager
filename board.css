@@ -311,6 +311,20 @@ html, body {
   padding: 2px 6px; border-radius: 4px;
 }
 
+/* Owner ring + overflow + goal colour dots (board cards) */
+.avatar-owner { box-shadow: 0 0 0 2px #c8102e; }      /* owner gets a brand ring */
+.avatar-more { background: #d4d4d4 !important; color: #444 !important; text-shadow: none; }
+.avatar-sm { width: 20px; height: 20px; font-size: 9px; border-width: 1px; margin-right: 0; }
+.goal-dots { display: inline-flex; gap: 3px; align-items: center; }
+.goal-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
+.kcard-meta .goal-dot { box-shadow: 0 0 0 1px rgba(0,0,0,.08); }
+
+/* Health left-edge accent on board cards */
+.kcard { border-left: 3px solid transparent; }
+.kcard.khealth-on-track  { border-left-color: #3bb273; }
+.kcard.khealth-at-risk   { border-left-color: #e0a100; }
+.kcard.khealth-off-track { border-left-color: #CA001B; }
+
 .kcard-foot {
   margin-top: 10px;
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
@@ -992,6 +1006,28 @@ html, body {
 .health-at-risk   { background: #e0a100; }
 .health-off-track { background: #CA001B; }
 .milestone-mark { color: #7a5cff; font-size: 12px; }
+
+/* Health chip (list view) — tinted pill + solid dot */
+.health-chip {
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+  font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+}
+.health-chip .health-dot { margin-right: 0; }
+.health-chip.health-on-track  { background: #e6f5ee; color: #137a3e; }
+.health-chip.health-at-risk   { background: #fbf2d8; color: #855900; }
+.health-chip.health-off-track { background: #fde2e4; color: #8b0000; }
+
+/* Owner cell (list view) — avatar + name */
+.owner-cell { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+
+/* Goal pills (list view) */
+.list-goals { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.goal-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; font-weight: 700; color: #333;
+  padding: 1px 7px; border-radius: 999px; border: 1px solid transparent;
+}
+.goal-pill .goal-dot { width: 7px; height: 7px; }
 .sched-chip {
   display: inline-flex; align-items: center; gap: 2px;
   border-radius: 10px; padding: 0 6px; font-size: 10px; font-weight: 800;
