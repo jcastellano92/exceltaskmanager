@@ -403,8 +403,8 @@ html, body {
 }
 .modal {
   background: #fff;
-  width: 94%; max-width: 1080px;
-  max-height: 94vh;
+  width: 96%; max-width: 1320px;
+  height: 92vh; max-height: 92vh;
   border-radius: 14px;
   display: flex; flex-direction: column;
   overflow: hidden;
@@ -417,12 +417,12 @@ html, body {
 }
 
 .modal-header {
-  display: flex; align-items: center; gap: 12px;
-  padding: 18px 22px 14px;
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 14px 18px 12px 22px;
   border-bottom: 1px solid #eee;
 }
 .modal-title-input {
-  flex: 1; min-width: 0;
+  flex: 1 1 300px; min-width: 200px;
   border: none;
   font-size: 21px; font-weight: 700; color: #1a1a1a;
   padding: 6px 6px;
@@ -462,14 +462,17 @@ html, body {
 .hp.active.hp-off-track { background: #CA001B; border-color: #CA001B; color: #fff; }
 .hp.active { background: #888; border-color: #888; color: #fff; }
 .mm-select { width: auto !important; min-width: 130px; min-height: 36px; box-sizing: border-box; line-height: 1.4; border: 1px solid #dcdcdc; border-radius: 8px; padding: 6px 10px; font-size: 13px; background: #fff; }
-.mm-wsjf { margin-left: auto; display: inline-flex; align-items: baseline; gap: 5px; }
+.mm-right { margin-left: auto; display: inline-flex; align-items: center; gap: 14px; }
+.mm-wsjf { display: inline-flex; align-items: baseline; gap: 5px; }
 .mm-wsjf b { font-size: 22px; font-weight: 800; color: #CA001B; }
 .mm-wsjf span { font-size: 11px; color: #999; font-weight: 700; }
 
-.modal-people { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 22px; border-bottom: 1px solid #f0f0f0; }
-.mp-label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #999; }
-.mp-owner { width: auto !important; min-width: 160px; min-height: 34px; box-sizing: border-box; line-height: 1.4; border: 1px solid #dcdcdc; border-radius: 8px; padding: 6px 10px; font-size: 13px; background: #fff; max-width: 280px; }
-.mp-sep { color: #ddd; }
+/* People cluster in the header (owner · contributors · allocation) */
+.modal-people { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.mp-block { display: flex; flex-direction: column; gap: 3px; }
+.mp-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #aaa; }
+.mp-owner { width: auto !important; min-width: 150px; min-height: 32px; box-sizing: border-box; line-height: 1.4; border: 1px solid #dcdcdc; border-radius: 8px; padding: 5px 9px; font-size: 13px; font-weight: 600; background: #fff; max-width: 220px; }
+.mp-owner:hover { border-color: #c2c2c2; }
 .people-chips { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .person-chip { display: inline-flex; align-items: center; gap: 5px; background: #f1f1f4; border-radius: 14px; padding: 2px 8px 2px 2px; font-size: 12px; }
 .pc-avatar { width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; color: #2b2b2b; }
@@ -508,6 +511,9 @@ html, body {
 .subtasks-head:hover { color: #CA001B; }
 .subtasks-head .st-caret { color: #999; font-size: 11px; }
 .subtasks-body[hidden] { display: none; }
+/* Grouped sections in the right column of the modal */
+.dg-card { border: 1px solid #ececf0; background: #fcfcfd; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.dg-card-h { margin: 0 0 2px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #888; font-weight: 800; }
 .dg-two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .dg-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .dg-dates .field-label { display: flex; flex-direction: column; gap: 3px; }
@@ -1153,10 +1159,12 @@ html, body {
 .btn-resched.btn-loss:hover { background: #fff4e5; border-color: #f0d9b5; color: #7d4612; }
 
 /* Capacity readout in the task modal */
-.cap-readout { font-size: 12px; font-weight: 700; padding: 5px 8px; border-radius: 6px; margin-top: 2px; }
-.cap-readout.cap-ok   { background: #eaf7ef; color: #1f7a44; }
-.cap-readout.cap-warn { background: #fff4e5; color: #a6601a; }
-.cap-readout.cap-over { background: #fdecee; color: #CA001B; }
+.cap-readout { align-self: center; font-size: 12px; font-weight: 800; padding: 6px 12px; border-radius: 999px; border: 1px solid transparent; white-space: nowrap; }
+.cap-readout.cap-ok   { background: #eaf7ef; color: #1f7a44; border-color: #cfe9d9; }
+.cap-readout.cap-warn { background: #fff4e5; color: #a6601a; border-color: #f0dcbf; }
+.cap-readout.cap-over { background: #fdecee; color: #CA001B; border-color: #f3c2c8; }
+/* over-allocated owner ring on board cards (communicates overallocation everywhere) */
+.avatar-overalloc { box-shadow: 0 0 0 2px #CA001B, 0 0 0 4px #fdecee; }
 
 /* Per-quarter progress inside a workstream card */
 .ws-quarters { display: flex; flex-direction: column; gap: 4px; }

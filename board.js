@@ -2847,11 +2847,13 @@
       text = who + " · " + quarter + ": " + projected + " pts planned — no capacity this quarter";
     } else {
       const ratio = projected / cap;
+      const pctTxt = Math.round(ratio * 100) + "%";
       cls = ratio > 1 ? "cap-over" : ratio > 0.85 ? "cap-warn" : "cap-ok";
-      text = who + " · " + quarter + ": " + projected + " / " + cap + " pts (" + Math.round(ratio * 100) + "%)";
+      text = (ratio > 1 ? "⚠ " : "") + who + " " + pctTxt + " · " + quarter + " (" + projected + "/" + cap + " pts)" + (ratio > 1 ? " OVER" : "");
     }
     el.hidden = false;
     el.className = "cap-readout " + cls;
+    el.title = text;
     el.textContent = text;
   }
 
@@ -3684,6 +3686,14 @@
     return String(t.GoalID || "").split(/[;,]/).map((s) => s.trim()).filter(Boolean);
   }
 
+  // Is a person committed beyond their effective capacity in a quarter?
+  function isOverAllocated(person, quarter) {
+    if (!person || !quarter) return false;
+    const cap = personCapacity(person, quarter);
+    if (!cap) return false;                       // no baseline → can't judge
+    return plannedPoints(person, quarter) > cap;
+  }
+
   // Owner + contributor avatars (owner first, ringed). Used on board + list.
   function peopleAvatars(task, max) {
     max = max || 4;
@@ -3695,11 +3705,12 @@
     contribs.forEach((c) => people.push({ name: c, owner: false }));
     const shown = people.slice(0, max);
     const extra = people.length - shown.length;
-    let h = shown.map((p) =>
-      '<span class="avatar' + (p.owner ? " avatar-owner" : "") + '" style="background:' +
-      colorHash(p.name) + '" title="' + escapeAttr(p.name + (p.owner ? " · owner" : " · contributor")) +
-      '">' + initialsFromName(p.name) + '</span>'
-    ).join("");
+    let h = shown.map((p) => {
+      const over = isOverAllocated(p.name, task.Quarter);
+      return '<span class="avatar' + (p.owner ? " avatar-owner" : "") + (over ? " avatar-overalloc" : "") + '" style="background:' +
+        colorHash(p.name) + '" title="' + escapeAttr(p.name + (p.owner ? " · owner" : " · contributor") + (over ? " · ⚠ over-allocated in " + task.Quarter : "")) +
+        '">' + initialsFromName(p.name) + '</span>';
+    }).join("");
     if (extra > 0) {
       h += '<span class="avatar avatar-more" title="' +
         escapeAttr(people.slice(max).map((p) => p.name).join(", ")) + '">+' + extra + '</span>';

@@ -144,6 +144,18 @@
   <div class="modal" id="task-modal">
     <header class="modal-header">
       <input id="m-title" class="modal-title-input" placeholder="Task title…" />
+      <!-- People cluster: owner · contributors · allocation (top-right) -->
+      <div class="modal-people" id="m-people">
+        <div class="mp-block">
+          <span class="mp-label">Owner</span>
+          <select id="m-owner" class="mp-owner"></select>
+        </div>
+        <div class="mp-block">
+          <span class="mp-label">Contributors</span>
+          <div class="people-chips" id="m-contributors"></div>
+        </div>
+        <div class="cap-readout" id="m-capacity-readout" hidden></div>
+      </div>
       <button class="close-btn" id="m-close">×</button>
     </header>
 
@@ -153,20 +165,12 @@
       <input type="hidden" id="m-health" value="" />
       <select id="m-status" class="mm-select" title="Status"></select>
       <select id="m-quarter" class="mm-select" title="Quarter"></select>
-      <span class="mm-wsjf" title="Priority Score (WSJF)"><b id="m-wsjf-score">—</b><span>WSJF</span></span>
-    </div>
-
-    <!-- PEOPLE -->
-    <div class="modal-people">
-      <span class="mp-label">Owner</span>
-      <select id="m-owner" class="mp-owner"></select>
-      <span class="mp-sep">·</span>
-      <span class="mp-label">Contributors</span>
-      <div class="people-chips" id="m-contributors"></div>
-      <div class="cap-readout" id="m-capacity-readout" hidden></div>
-      <div class="reschedule-row" id="m-reschedule" hidden>
-        <button type="button" id="m-pull-earlier" class="btn-resched btn-win" title="Pull into an earlier quarter — completing sooner">⏪ Accelerate</button>
-        <button type="button" id="m-slip-later" class="btn-resched btn-loss" title="Roll over to the next quarter — a slip">Delay ⏩</button>
+      <div class="mm-right">
+        <div class="reschedule-row" id="m-reschedule" hidden>
+          <button type="button" id="m-pull-earlier" class="btn-resched btn-win" title="Pull into an earlier quarter — completing sooner">⏪ Accelerate</button>
+          <button type="button" id="m-slip-later" class="btn-resched btn-loss" title="Roll over to the next quarter — a slip">Delay ⏩</button>
+        </div>
+        <span class="mm-wsjf" title="Priority Score (WSJF)"><b id="m-wsjf-score">—</b><span>WSJF</span></span>
       </div>
     </div>
 
@@ -235,7 +239,8 @@
           </div>
 
           <div class="dg-side">
-            <div class="wsjf-panel">
+            <div class="wsjf-panel dg-card">
+              <h4 class="dg-card-h">Priority · WSJF</h4>
               <p class="wsjf-explain"><strong>Higher = do it sooner.</strong> (Value + Time-criticality + Risk/Opportunity) ÷ Job size, Fibonacci.</p>
               <div class="wsjf-sub muted">Now: <strong id="m-cod">—</strong> (<span id="m-ubv-readout">—</span>+<span id="m-tc-readout">—</span>+<span id="m-rr-readout">—</span>) ÷ effort <strong id="m-js-readout">—</strong></div>
               <div class="wsjf-inputs">
@@ -246,16 +251,18 @@
               </div>
             </div>
 
-            <div class="dg-dates">
-              <label class="field-label">Start<input type="date" id="m-start" /></label>
-              <label class="field-label">Due<input type="date" id="m-due" /></label>
+            <div class="dg-card">
+              <h4 class="dg-card-h">Schedule</h4>
+              <div class="dg-dates">
+                <label class="field-label">Start<input type="date" id="m-start" /></label>
+                <label class="field-label">Due<input type="date" id="m-due" /></label>
+              </div>
+              <label class="field-label checkbox-inline" id="m-autopct-row" hidden><input type="checkbox" id="m-autopct" /> Set % from subtasks</label>
+              <label class="field-label">% Complete: <span id="m-pct-readout">0</span>%</label>
+              <input type="range" min="0" max="100" id="m-pct" />
             </div>
 
-            <label class="field-label checkbox-inline" id="m-autopct-row" hidden><input type="checkbox" id="m-autopct" /> Set % from subtasks</label>
-            <label class="field-label">% Complete: <span id="m-pct-readout">0</span>%</label>
-            <input type="range" min="0" max="100" id="m-pct" />
-
-            <div class="dg-meta-readonly">
+            <div class="dg-card dg-meta-readonly">
               <span class="field-label">Epic</span> <span class="readonly" id="m-epic">—</span>
               <span class="field-label">Source</span> <span class="readonly" id="m-source">—</span>
             </div>
