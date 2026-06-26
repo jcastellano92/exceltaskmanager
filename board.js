@@ -22,6 +22,7 @@
     capacity: {},                        // { person: {availability, baseline} } from CapacityTable
     expandedSubtasks: new Set(),         // taskIds whose subtask checklist is expanded inline (board + list)
     milestones: [],                      // standalone roadmap milestone lines (MilestonesTable)
+    allUpdates: [],                      // every Updates row (for the My Tasks "recent updates" feed)
     roadmap: { showDates: true, expanded: new Set() }, // roadmap prefs: drag date tooltip + expanded subtask lanes
     selected: new Set(),                 // taskIds selected in List view for bulk actions
     sort: "wsjf",                        // board column sort: "wsjf" | "due" | "manual"
@@ -261,9 +262,15 @@
   async function reloadTasks() {
     State.tasks = await window.WsjfData.readAllTasks();
     await loadAllSubtasks();
+    await loadAllUpdates();
     State.lastSyncTs = Date.now();
     updateSyncLabel();
     refreshTagFilterMenu();
+  }
+
+  async function loadAllUpdates() {
+    try { State.allUpdates = await window.WsjfData._internal._readTable("UpdatesTable"); }
+    catch (e) { State.allUpdates = []; }
   }
 
   async function loadAllSubtasks() {
@@ -1170,11 +1177,10 @@
 
     const meName = State.me.name.toLowerCase();
     const meEmail = State.me.email ? String(State.me.email).toLowerCase() : "";
-    const isMine = (t) => {
-      const o = String(t.Owner || "").toLowerCase();
-      return o.includes(meName) || (meEmail && o.includes(meEmail));
-    };
-    const mine = State.tasks.filter(isMine);
+    const matchMe = (s) => { const v = String(s || "").toLowerCase(); return v.includes(meName) || (meEmail && v.includes(meEmail)); };
+    // "Connected" = I own it OR I'm a contributor.
+    const isConnected = (t) => matchMe(t.Owner) || matchMe(t.Contributors);
+    const mine = State.tasks.filter(isConnected);
     const open = mine.filter((t) => t.Status !== "Done");
     const todayIso = new Date().toISOString().slice(0, 10);
     const in7Iso = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
@@ -1187,7 +1193,7 @@
     const header = document.createElement("div");
     header.className = "mine-header";
     header.innerHTML = '<h2>My Tasks</h2><span class="mine-who"></span>';
-    header.querySelector(".mine-who").textContent = State.me.name;
+    header.querySelector(".mine-who").textContent = State.me.name + " · owned + contributing";
     root.appendChild(header);
 
     const stats = document.createElement("div");
@@ -1204,15 +1210,73 @@
     ).join("");
     root.appendChild(stats);
 
-    const attention = overdue.concat(blocked.filter((b) => overdue.indexOf(b) < 0)).sort(byWsjfDesc);
-    root.appendChild(mineSection("⚠ Needs attention", attention, "Nothing needs attention right now."));
+    // ⚠ Needs attention = overdue or blocked. Only shown when there's something —
+    // so it's never a confusing empty "(0)" section.
+    const attention = overdue.concat(blocked.filter((b) => overdue.indexOf(b) < 0)).sort(byDueThenWsjf);
+    if (attention.length) {
+      root.appendChild(mineSection("⚠ Needs attention — overdue or blocked", attention, ""));
+    }
 
+    // Recent updates on tasks I'm connected to.
+    const updSec = buildRecentUpdates(mine);
+    if (updSec) root.appendChild(updSec);
+
+    // Priorities = active work (excludes Backlog and Done), soonest due first, then WSJF.
     const attSet = new Set(attention.map((t) => Number(t.TaskID)));
-    const priorities = open.filter((t) => !attSet.has(Number(t.TaskID))).sort(byWsjfDesc);
-    root.appendChild(mineSection("My priorities (by WSJF)", priorities, "No open tasks. 🎉"));
+    const active = open.filter((t) => t.Status !== "Backlog" && !attSet.has(Number(t.TaskID)));
+    const priorities = active.sort(byDueThenWsjf);
+    root.appendChild(mineSection("My priorities — by due date, then WSJF", priorities, "No active tasks. 🎉"));
 
     const done = mine.filter((t) => t.Status === "Done").sort(byWsjfDesc).slice(0, 6);
     root.appendChild(mineSection("Recently completed", done, "Nothing completed yet."));
+  }
+
+  // Soonest due first (no due date = last), then highest WSJF.
+  function byDueThenWsjf(a, b) {
+    const ad = isoDate(a.DueDate) || "9999-12-31";
+    const bd = isoDate(b.DueDate) || "9999-12-31";
+    if (ad !== bd) return ad < bd ? -1 : 1;
+    return (Number(b.WSJF) || 0) - (Number(a.WSJF) || 0);
+  }
+
+  // "Recent updates" feed for the My Tasks view — newest updates on any task the
+  // user owns or contributes to (including updates posted on its subtasks).
+  function buildRecentUpdates(mineTasks) {
+    if (!State.allUpdates || !State.allUpdates.length) return null;
+    const myTaskIds = new Set(mineTasks.map((t) => Number(t.TaskID)));
+    // subtaskId → parentTaskId
+    const subParent = {};
+    Object.keys(State.subtasksByParent).forEach((pid) => {
+      (State.subtasksByParent[pid] || []).forEach((s) => { subParent[Number(s.SubtaskID)] = Number(pid); });
+    });
+    const titleOf = (tid) => { const t = State.tasks.find((x) => Number(x.TaskID) === Number(tid)); return t ? t.Title : ""; };
+    const rows = State.allUpdates.map((u) => {
+      let tid = null;
+      if (String(u.ParentType) === "Task") tid = Number(u.ParentID);
+      else if (String(u.ParentType) === "Subtask") tid = subParent[Number(u.ParentID)];
+      return { u: u, tid: tid };
+    }).filter((r) => r.tid != null && myTaskIds.has(r.tid))
+      .sort((a, b) => String(b.u.AddedDate).localeCompare(String(a.u.AddedDate)))
+      .slice(0, 6);
+    if (!rows.length) return null;
+
+    const sec = document.createElement("section");
+    sec.className = "mine-section";
+    const h = document.createElement("h3");
+    h.textContent = "Recent updates (" + rows.length + ")";
+    sec.appendChild(h);
+    rows.forEach((r) => {
+      const div = document.createElement("div");
+      div.className = "mine-update";
+      div.innerHTML =
+        '<div class="mu-task">' + escapeHtml(titleOf(r.tid)) +
+          (String(r.u.ParentType) === "Subtask" ? ' <span class="mu-on">· subtask</span>' : '') + '</div>' +
+        '<div class="mu-text">' + escapeHtml(r.u.Text || "") + '</div>' +
+        '<div class="mu-meta">' + escapeHtml(r.u.AddedBy || "?") + ' · ' + relTime(r.u.AddedDate) + '</div>';
+      div.addEventListener("click", () => openEditModal(Number(r.tid)));
+      sec.appendChild(div);
+    });
+    return sec;
   }
 
   function mineSection(title, tasks, emptyMsg) {
