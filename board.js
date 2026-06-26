@@ -408,7 +408,7 @@
 
     el.innerHTML = `
       <div class="kcard-head">
-        <span class="kcard-title" title="${escapeAttr(task.Title)}">${isMilestone ? '<span class="milestone-mark" title="Milestone">◆</span> ' : ""}${healthDot}${escapeHtml(task.Title || "")}</span>
+        <span class="kcard-title" title="${escapeAttr(task.Title)}">${isMilestone ? '<span class="milestone-mark" title="Milestone">◆</span> ' : ""}${healthDot}${rolloverBadge(task)}${escapeHtml(task.Title || "")}</span>
         <span class="wsjf-pill ${wsjfClass}">${wsjf.toFixed(1)}</span>
       </div>`;
     el.innerHTML += `
@@ -674,7 +674,7 @@
       : '';
     let h = '<tr data-task-id="' + t.TaskID + '">' +
       '<td class="sel-col"><input type="checkbox" class="sel-row" data-id="' + t.TaskID + '"' + (State.selected.has(Number(t.TaskID)) ? " checked" : "") + ' /></td>' +
-      '<td class="list-title">' + caret + escapeHtml(t.Title || "") + '</td>' +
+      '<td class="list-title">' + caret + rolloverBadge(t) + escapeHtml(t.Title || "") + '</td>' +
       '<td><span class="status-chip status-' + statusSlug(t.Status) + '">' + escapeHtml(t.Status || "") + '</span></td>' +
       '<td>' + escapeHtml(t.Owner || "") + '</td>' +
       '<td>' + escapeHtml(workstreamName(t.WorkstreamID)) + '</td>' +
@@ -917,6 +917,8 @@
       '<select class="bulk-set" data-bulk="pct"><option value="">Set %…</option>' + pcts.map((p) => opt(String(p), p + '%')).join('') + '</select>' +
       '<label class="bulk-date">Start <input type="date" class="bulk-date-input" data-bulk="startdate" /></label>' +
       '<label class="bulk-date">Due <input type="date" class="bulk-date-input" data-bulk="duedate" /></label>' +
+      '<button class="btn btn-secondary btn-sm" data-bulk="earlier" title="Pull in one quarter — completing sooner (logs Accelerated)">⏪ Accelerate</button>' +
+      '<button class="btn btn-secondary btn-sm" data-bulk="later" title="Roll over one quarter — a slip (logs Delayed)">Delay ⏩</button>' +
       '<button class="btn btn-archive btn-sm" data-bulk="archive">Archive</button>' +
       '<button class="btn btn-secondary btn-sm" data-bulk="clear">Clear</button>';
     Array.from(bar.querySelectorAll(".bulk-set")).forEach((sel) => {
@@ -933,6 +935,8 @@
         if (val) applyBulk(kind, val);
       });
     });
+    bar.querySelector('[data-bulk="earlier"]').addEventListener("click", () => applyBulk("earlier"));
+    bar.querySelector('[data-bulk="later"]').addEventListener("click", () => applyBulk("later"));
     bar.querySelector('[data-bulk="archive"]').addEventListener("click", () => applyBulk("archive"));
     bar.querySelector('[data-bulk="clear"]').addEventListener("click", () => { State.selected.clear(); renderList(); });
   }
@@ -949,6 +953,8 @@
       pct: 'set % complete to ' + val + '%',
       startdate: 'set start date to ' + val,
       duedate: 'set due date to ' + val,
+      earlier: 'accelerate one quarter (pull in)',
+      later: 'delay one quarter (roll over)',
       archive: 'archive'
     };
     const label = labels[kind] || kind;
@@ -961,6 +967,10 @@
       try {
         if (kind === "status") await window.WsjfData.writeTaskStatus(id, val, 999);
         else if (kind === "archive") await window.WsjfData.archiveTask(id);
+        else if (kind === "earlier" || kind === "later") {
+          const r = await rescheduleTask(id, kind);
+          if (!r || r.error) { fail++; continue; }
+        }
         else if (FIELD[kind]) {
           const value = kind === "pct" ? Number(val) : val;
           await window.WsjfData.writeTask({ TaskID: id, [FIELD[kind]]: value }, { force: true });
@@ -1551,7 +1561,7 @@
               '<span class="rm-bar-fill" style="width:' + pct + '%"></span>' +
               '<span class="rm-bar-label">' + escapeHtml(t.Title || "") + '</span></div>';
         html += '<div class="rm-row" data-task-id="' + t.TaskID + '">' +
-          '<div class="rm-row-label" title="' + escapeAttr(t.Title) + '">' + (isM ? "◆ " : "") + escapeHtml(t.Title || "") + '</div>' +
+          '<div class="rm-row-label" title="' + escapeAttr(t.Title) + '">' + (isM ? "◆ " : "") + rolloverBadge(t) + escapeHtml(t.Title || "") + '</div>' +
           '<div class="rm-row-track">' + bar + '<div class="rm-today" style="left:' + todayPct + '%"></div></div></div>';
       });
     });
@@ -2107,6 +2117,10 @@
     // Owner change re-renders contributors (owner can't also be a contributor)
     document.getElementById("m-owner").addEventListener("change", () => { renderContributors(currentContributors()); updateCapacityReadout(); });
 
+    // Pull earlier / Slip later (immediate, logged)
+    document.getElementById("m-pull-earlier").addEventListener("click", () => modalReschedule("earlier"));
+    document.getElementById("m-slip-later").addEventListener("click", () => modalReschedule("later"));
+
     // Generic dirty tracking
     ["m-title","m-description","m-owner","m-workstream","m-goal","m-quarter","m-status","m-due","m-start"]
       .forEach((id) => document.getElementById(id).addEventListener("change", markDirty));
@@ -2244,6 +2258,8 @@
     document.getElementById("m-health").value = t.Health || "";
     document.getElementById("m-milestone").checked = String(t.IsMilestone).toLowerCase() === "yes";
     updateCapacityReadout();
+    const reschedRow = document.getElementById("m-reschedule");
+    if (reschedRow) reschedRow.hidden = !t.TaskID;   // reschedule only existing tasks
 
     // Tags
     renderTagPills(String(t.Tags || "").split(";").map((x) => x.trim()).filter(Boolean));
@@ -2302,6 +2318,32 @@
     el.hidden = false;
     el.className = "cap-readout " + cls;
     el.textContent = text;
+  }
+
+  // Pull earlier / Slip later from inside the modal (acts on the loaded task).
+  async function modalReschedule(dir) {
+    if (!currentEditingTask || !currentEditingTask.TaskID) return;
+    const r = await rescheduleTask(currentEditingTask.TaskID, dir);
+    if (!r || r.error) {
+      toast(
+        r && r.error === "no-quarter" ? "Set a quarter (Q1–Q4) first." :
+        r && r.error === "at-start" ? "Already in Q1 — can't pull earlier." :
+        r && r.error === "at-end" ? "Already in Q4 — can't slip later." : "Couldn't reschedule.",
+        "warn");
+      return;
+    }
+    currentEditingTask.Quarter = r.newQ;
+    if (r.startDate !== undefined) currentEditingTask.StartDate = r.startDate;
+    if (r.dueDate !== undefined) currentEditingTask.DueDate = r.dueDate;
+    if (r.ts) currentEditingTask._loadedLastUpdated = r.ts;  // avoid a false conflict on next Save
+    const qs = document.getElementById("m-quarter"); if (qs) qs.value = r.newQ;
+    document.getElementById("m-start").value = isoDate(currentEditingTask.StartDate);
+    document.getElementById("m-due").value = isoDate(currentEditingTask.DueDate);
+    updateCapacityReadout();
+    try { renderActivity(await window.WsjfData.readActivityForTask(currentEditingTask.TaskID, 10)); } catch (_) {}
+    await reloadTasks();
+    if (dir === "earlier") toast("🎉 Accelerated: " + r.oldQ + " → " + r.newQ, "info");
+    else toast("↻ Delayed: " + r.oldQ + " → " + r.newQ, "warn");
   }
 
   // Populate a WSJF dropdown with the Fibonacci scale. Job Size tops out lower
@@ -2945,6 +2987,13 @@
     return String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-");
   }
 
+  // Roll-over indicator (PI planning): a task slipped to a later quarter at least
+  // net once. Driven by the optional Slips counter. Returns "" if not rolled over.
+  function rolloverBadge(t) {
+    const s = Number(t && t.Slips) || 0;
+    return s > 0 ? '<span class="rollover-badge" title="Delayed ' + s + ' quarter' + (s === 1 ? "" : "s") + ' (net)">↻ ' + s + '</span> ' : "";
+  }
+
   function wsjfPillClass(v) {
     if (v >= 15) return "wsjf-red";
     if (v >= 10) return "wsjf-orange";
@@ -3074,6 +3123,51 @@
     const today = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00");
     const endDt = new Date(end + "T00:00:00");
     return Math.round((endDt - today) / 86400000);
+  }
+
+  function shiftIso(iso, deltaMs) {
+    const base = isoDate(iso);
+    if (!base) return iso;
+    const t = new Date(base + "T00:00:00").getTime();
+    if (isNaN(t)) return iso;
+    return new Date(t + deltaMs).toISOString().slice(0, 10);
+  }
+
+  // Move a task one quarter earlier ("Pulled earlier" / accelerated) or later
+  // ("Slipped later" / delayed), shifting its dates, bumping the roll-over count,
+  // and logging the event distinctly. dir = "earlier" | "later".
+  async function rescheduleTask(taskId, dir) {
+    const t = State.tasks.find((x) => Number(x.TaskID) === Number(taskId));
+    if (!t) return { error: "not-found" };
+    const order = ["Q1", "Q2", "Q3", "Q4"];
+    const idx = order.indexOf(t.Quarter);
+    if (idx < 0) return { error: "no-quarter" };
+    const ni = dir === "earlier" ? idx - 1 : idx + 1;
+    if (ni < 0) return { error: "at-start" };
+    if (ni >= order.length) return { error: "at-end" };
+    const oldQ = order[idx], newQ = order[ni];
+
+    const updates = { TaskID: taskId, Quarter: newQ };
+    // Shift dates by the gap between the two quarters' starts (keeps duration).
+    const oqd = State.quarterDates[oldQ], nqd = State.quarterDates[newQ];
+    if (oqd && nqd && oqd.start && nqd.start) {
+      const delta = new Date(isoDate(nqd.start) + "T00:00:00").getTime() -
+        new Date(isoDate(oqd.start) + "T00:00:00").getTime();
+      if (t.StartDate) updates.StartDate = shiftIso(t.StartDate, delta);
+      if (t.DueDate) updates.DueDate = shiftIso(t.DueDate, delta);
+    }
+    // Roll-over counter (optional Slips column): +1 slipping later, −1 pulling earlier.
+    updates.Slips = Math.max(0, (Number(t.Slips) || 0) + (dir === "later" ? 1 : -1));
+
+    const ts = await window.WsjfData.writeTask(updates, { force: true, silent: true });
+    const action = dir === "earlier" ? "Accelerated" : "Delayed";
+    await window.WsjfData.logActivity("Task", taskId, action, "Quarter", oldQ, newQ, "");
+
+    // Local mirror so the board/list reflects it without a full reload.
+    t.Quarter = newQ; t.Slips = updates.Slips;
+    if (updates.StartDate !== undefined) t.StartDate = updates.StartDate;
+    if (updates.DueDate !== undefined) t.DueDate = updates.DueDate;
+    return { oldQ, newQ, action, ts, startDate: updates.StartDate, dueDate: updates.DueDate };
   }
 
   function relTime(iso) {

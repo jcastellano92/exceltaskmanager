@@ -178,7 +178,11 @@
   // ────────────────────────────────────────────────────────────
   async function _findRowIndexById(tableName, idColumn, idValue) {
     const all = await _readTable(tableName);
-    const r = all.find((row) => Number(row[idColumn]) === Number(idValue));
+    // Compare as trimmed strings so it works for numeric IDs (TaskID 5) AND
+    // string IDs (WorkstreamID "WS09", GoalID "G1"). The previous Number()
+    // comparison made NaN === NaN, so string IDs were never found.
+    const target = String(idValue == null ? "" : idValue).trim();
+    const r = all.find((row) => String(row[idColumn] == null ? "" : row[idColumn]).trim() === target);
     return r ? r._rowIndex : -1;
   }
 
@@ -265,7 +269,7 @@
       if (Object.prototype.hasOwnProperty.call(taskObj, h)) updates[h] = taskObj[h];
     });
     // Optional columns not in the canonical header list (written only if present).
-    ["StartDate", "CommitmentID", "IsMilestone", "Health"].forEach((h) => {
+    ["StartDate", "CommitmentID", "IsMilestone", "Health", "Slips"].forEach((h) => {
       if (Object.prototype.hasOwnProperty.call(taskObj, h)) updates[h] = taskObj[h];
     });
     updates.LastUpdated = ts;
@@ -349,7 +353,7 @@
     });
     // Optional columns not in the canonical header list (written only if the
     // column exists; harmlessly ignored otherwise).
-    ["StartDate", "CommitmentID", "IsMilestone", "Health"].forEach((h) => {
+    ["StartDate", "CommitmentID", "IsMilestone", "Health", "Slips"].forEach((h) => {
       if (Object.prototype.hasOwnProperty.call(taskObj, h)) obj[h] = taskObj[h];
     });
 
