@@ -4,3 +4,8 @@
 *.xlsx
 DASHBOARD-CAPACITY-NOTES.md
 DASHBOARD-SPEC.md
+
+# Local visual-test harness (mock Office/Sortable) — never publish
+_harness.html
+_mock.js
+_*.png

@@ -151,147 +151,136 @@
       <button class="close-btn" id="m-close">×</button>
     </header>
 
-    <div class="modal-body">
-      <!-- LEFT -->
-      <section class="modal-left">
-        <label class="field-label">Description</label>
-        <textarea id="m-description" rows="4" placeholder="Describe the task…"></textarea>
+    <!-- META BAR (always visible) -->
+    <div class="modal-meta">
+      <div class="mm-health" id="m-health-flip"></div>
+      <input type="hidden" id="m-health" value="" />
+      <select id="m-status" class="mm-select" title="Status"></select>
+      <select id="m-quarter" class="mm-select" title="Quarter"></select>
+      <span class="mm-wsjf" title="Priority Score (WSJF)"><b id="m-wsjf-score">—</b><span>WSJF</span></span>
+    </div>
 
-        <div class="section-block">
-          <h4>Subtasks <span id="m-subtask-count" class="muted"></span></h4>
-          <ul id="m-subtask-list" class="subtask-list"></ul>
-          <button class="btn-link" id="m-add-subtask">+ Add subtask</button>
-        </div>
+    <!-- PEOPLE -->
+    <div class="modal-people">
+      <span class="mp-label">Owner</span>
+      <select id="m-owner" class="mp-owner"></select>
+      <span class="mp-sep">·</span>
+      <span class="mp-label">Contributors</span>
+      <div class="people-chips" id="m-contributors"></div>
+      <div class="cap-readout" id="m-capacity-readout" hidden></div>
+      <div class="reschedule-row" id="m-reschedule" hidden>
+        <button type="button" id="m-pull-earlier" class="btn-resched btn-win" title="Pull into an earlier quarter — completing sooner">⏪ Accelerate</button>
+        <button type="button" id="m-slip-later" class="btn-resched btn-loss" title="Roll over to the next quarter — a slip">Delay ⏩</button>
+      </div>
+    </div>
 
-        <div class="section-block">
-          <h4>Attachments</h4>
-          <ul id="m-att-list" class="att-list"></ul>
-          <button class="btn-link" id="m-add-att">+ Add Attachment</button>
-          <div id="m-att-form" class="att-form" hidden>
-            <input id="m-att-label" placeholder="Label" />
-            <input id="m-att-url" placeholder="https://…" />
-            <select id="m-att-type">
-              <option value="web">🌐 web</option>
-              <option value="confluence">📄 confluence</option>
-              <option value="sharepoint">📁 sharepoint</option>
-              <option value="file">📎 file</option>
-            </select>
-            <button class="btn btn-primary btn-sm" id="m-att-save">Add</button>
-            <button class="btn btn-secondary btn-sm" id="m-att-cancel">Cancel</button>
+    <!-- TABS -->
+    <div class="modal-tabs" id="m-tabs">
+      <button type="button" data-tab="details" class="active">Details</button>
+      <button type="button" data-tab="subtasks">Subtasks <span id="m-subtask-count" class="tab-count"></span></button>
+      <button type="button" data-tab="updates">Updates <span id="m-updates-count" class="tab-count"></span></button>
+      <button type="button" data-tab="activity">Activity</button>
+    </div>
+
+    <div class="modal-body2">
+      <!-- DETAILS -->
+      <section class="tabpane" data-pane="details">
+        <div class="details-grid">
+          <div class="dg-main">
+            <label class="field-label">Description</label>
+            <textarea id="m-description" rows="3" placeholder="Describe the task…"></textarea>
+
+            <div class="dg-two">
+              <div>
+                <label class="field-label">Workstream</label>
+                <select id="m-workstream"></select>
+              </div>
+              <div>
+                <label class="field-label">Goals</label>
+                <div class="contrib-checks" id="m-goal"></div>
+              </div>
+            </div>
+
+            <label class="field-label">Tags</label>
+            <div class="tag-input-wrap">
+              <div class="tag-input-pills" id="m-tag-pills"></div>
+              <input id="m-tag-input" type="text" placeholder="Type and press , or Enter…" />
+              <div id="m-tag-suggest" class="tag-suggest" hidden></div>
+            </div>
+
+            <label class="field-label">Blocked By</label>
+            <div class="blocked-by-wrap">
+              <div class="blocked-pills" id="m-blocked-pills"></div>
+              <button class="btn-link" id="m-blocked-add">+ Add</button>
+              <div class="blocked-picker" id="m-blocked-picker" hidden></div>
+            </div>
+
+            <div class="section-block">
+              <h4>Attachments</h4>
+              <ul id="m-att-list" class="att-list"></ul>
+              <button class="btn-link" id="m-add-att">+ Add Attachment</button>
+              <div id="m-att-form" class="att-form" hidden>
+                <input id="m-att-label" placeholder="Label" />
+                <input id="m-att-url" placeholder="https://…" />
+                <select id="m-att-type">
+                  <option value="web">🌐 web</option>
+                  <option value="confluence">📄 confluence</option>
+                  <option value="sharepoint">📁 sharepoint</option>
+                  <option value="file">📎 file</option>
+                </select>
+                <button class="btn btn-primary btn-sm" id="m-att-save">Add</button>
+                <button class="btn btn-secondary btn-sm" id="m-att-cancel">Cancel</button>
+              </div>
+            </div>
           </div>
-        </div>
 
-        <div class="section-block">
-          <h4>Updates <span id="m-updates-count" class="muted"></span></h4>
-          <div id="m-updates-list" class="updates-list"></div>
-          <div class="update-add">
-            <textarea id="m-update-text" rows="2" placeholder="Add an update…"></textarea>
-            <button class="btn btn-primary btn-sm" id="m-update-add">Post update</button>
+          <div class="dg-side">
+            <div class="wsjf-panel">
+              <p class="wsjf-explain"><strong>Higher = do it sooner.</strong> (Value + Time-criticality + Risk/Opportunity) ÷ Job size, Fibonacci.</p>
+              <div class="wsjf-sub muted">Now: <strong id="m-cod">—</strong> (<span id="m-ubv-readout">—</span>+<span id="m-tc-readout">—</span>+<span id="m-rr-readout">—</span>) ÷ effort <strong id="m-js-readout">—</strong></div>
+              <div class="wsjf-inputs">
+                <label title="Business/user value of finishing this">Business Value<select id="m-ubv"></select></label>
+                <label title="How time-sensitive / does value decay if we wait">Time Criticality<select id="m-tc"></select></label>
+                <label title="Reduces risk or unlocks other work / opportunities">Risk / Opportunity<select id="m-rr"></select></label>
+                <label title="Effort to deliver — bigger = lower priority for same value">Job Size (effort)<select id="m-js"></select></label>
+              </div>
+            </div>
+
+            <div class="dg-dates">
+              <label class="field-label">Start<input type="date" id="m-start" /></label>
+              <label class="field-label">Due<input type="date" id="m-due" /></label>
+            </div>
+
+            <label class="field-label checkbox-inline" id="m-autopct-row" hidden><input type="checkbox" id="m-autopct" /> Set % from subtasks</label>
+            <label class="field-label">% Complete: <span id="m-pct-readout">0</span>%</label>
+            <input type="range" min="0" max="100" id="m-pct" />
+
+            <div class="dg-meta-readonly">
+              <span class="field-label">Epic</span> <span class="readonly" id="m-epic">—</span>
+              <span class="field-label">Source</span> <span class="readonly" id="m-source">—</span>
+            </div>
           </div>
-        </div>
-
-        <div class="section-block">
-          <h4 class="collapsible" id="m-activity-toggle">▸ Activity</h4>
-          <ul id="m-activity-list" class="activity-list" hidden></ul>
         </div>
       </section>
 
-      <!-- RIGHT -->
-      <section class="modal-right">
-        <div class="wsjf-panel">
-          <div class="wsjf-score-row">
-            <span class="wsjf-score-label">Priority Score (WSJF)</span>
-            <span class="wsjf-score-value" id="m-wsjf-score">—</span>
-          </div>
-          <p class="wsjf-explain">
-            <strong>Higher score = do it sooner.</strong>
-            Score = (Business Value + Time Criticality + Risk/Opportunity) ÷ Job&nbsp;Size.
-            Pick from the Fibonacci scale — bigger numbers mean “a lot more”.
-          </p>
-          <div class="wsjf-sub muted">
-            Value of doing it now: <strong id="m-cod">—</strong>
-            (<span id="m-ubv-readout">—</span>+<span id="m-tc-readout">—</span>+<span id="m-rr-readout">—</span>)
-            ÷ effort <strong id="m-js-readout">—</strong>
-          </div>
+      <!-- SUBTASKS -->
+      <section class="tabpane" data-pane="subtasks" hidden>
+        <ul id="m-subtask-list" class="subtask-list"></ul>
+        <button class="btn-link" id="m-add-subtask">+ Add subtask</button>
+      </section>
 
-          <div class="wsjf-inputs">
-            <label title="How much business/user value does finishing this deliver?">
-              Business Value<select id="m-ubv"></select></label>
-            <label title="How time-sensitive is it? Does value decay if we wait (deadlines, market windows)?">
-              Time Criticality<select id="m-tc"></select></label>
-            <label title="Does it reduce risk or unlock/enable other work and future opportunities?">
-              Risk / Opportunity<select id="m-rr"></select></label>
-            <label title="How big is the effort to deliver it? Bigger = lower priority for the same value.">
-              Job Size (effort)<select id="m-js"></select></label>
-          </div>
+      <!-- UPDATES -->
+      <section class="tabpane" data-pane="updates" hidden>
+        <div id="m-updates-list" class="updates-list"></div>
+        <div class="update-add">
+          <textarea id="m-update-text" rows="2" placeholder="Add an update…"></textarea>
+          <button class="btn btn-primary btn-sm" id="m-update-add">Post update</button>
         </div>
+      </section>
 
-        <label class="field-label">Owner</label>
-        <select id="m-owner"></select>
-
-        <label class="field-label">Contributors</label>
-        <div class="contrib-checks" id="m-contributors"></div>
-
-        <label class="field-label">Workstream</label>
-        <select id="m-workstream"></select>
-
-        <label class="field-label">Goals</label>
-        <div class="contrib-checks" id="m-goal"></div>
-
-        <label class="field-label">Quarter</label>
-        <select id="m-quarter"></select>
-        <div id="m-capacity-readout" class="cap-readout" hidden></div>
-        <div class="reschedule-row" id="m-reschedule" hidden>
-          <button type="button" id="m-pull-earlier" class="btn-resched btn-win" title="Pull into an earlier quarter — completing sooner">⏪ Accelerate</button>
-          <button type="button" id="m-slip-later" class="btn-resched btn-loss" title="Roll over to the next quarter — a slip">Delay ⏩</button>
-        </div>
-
-        <label class="field-label">Status</label>
-        <select id="m-status"></select>
-
-        <label class="field-label">Health</label>
-        <select id="m-health">
-          <option value="">—</option>
-          <option value="On Track">🟢 On Track</option>
-          <option value="At Risk">🟡 At Risk</option>
-          <option value="Off Track">🔴 Off Track</option>
-        </select>
-
-        <label class="field-label checkbox-inline" id="m-milestone-row">
-          <input type="checkbox" id="m-milestone" /> ◆ Milestone (key roadmap date)
-        </label>
-
-        <label class="field-label">Start Date</label>
-        <input type="date" id="m-start" />
-
-        <label class="field-label">Due Date</label>
-        <input type="date" id="m-due" />
-
-        <label class="field-label checkbox-inline" id="m-autopct-row" hidden>
-          <input type="checkbox" id="m-autopct" /> Set % from subtasks
-        </label>
-        <label class="field-label">% Complete: <span id="m-pct-readout">0</span>%</label>
-        <input type="range" min="0" max="100" id="m-pct" />
-
-        <label class="field-label">Tags</label>
-        <div class="tag-input-wrap">
-          <div class="tag-input-pills" id="m-tag-pills"></div>
-          <input id="m-tag-input" type="text" placeholder="Type and press , or Enter…" />
-          <div id="m-tag-suggest" class="tag-suggest" hidden></div>
-        </div>
-
-        <label class="field-label">Blocked By</label>
-        <div class="blocked-by-wrap">
-          <div class="blocked-pills" id="m-blocked-pills"></div>
-          <button class="btn-link" id="m-blocked-add">+ Add</button>
-          <div class="blocked-picker" id="m-blocked-picker" hidden></div>
-        </div>
-
-        <label class="field-label">Linked Epic</label>
-        <div class="readonly" id="m-epic">—</div>
-
-        <label class="field-label">Source</label>
-        <div class="readonly" id="m-source">—</div>
+      <!-- ACTIVITY -->
+      <section class="tabpane" data-pane="activity" hidden>
+        <ul id="m-activity-list" class="activity-list"></ul>
       </section>
     </div>
 

@@ -438,6 +438,53 @@ html, body {
 }
 .modal-left, .modal-right { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 
+/* ── Redesigned modal: meta bar · people · tabs · panes ── */
+.modal-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 22px; border-bottom: 1px solid #f0f0f0; background: #fafafb; }
+.mm-health { display: inline-flex; gap: 4px; }
+.hp { border: 1px solid #e0e0e0; background: #fff; border-radius: 14px; padding: 3px 10px; font-size: 12px; font-weight: 700; color: #888; cursor: pointer; }
+.hp:hover { border-color: #c2c2c2; }
+.hp.active.hp-on-track { background: #2e9e5b; border-color: #2e9e5b; color: #fff; }
+.hp.active.hp-at-risk { background: #e0a100; border-color: #e0a100; color: #fff; }
+.hp.active.hp-off-track { background: #CA001B; border-color: #CA001B; color: #fff; }
+.hp.active { background: #888; border-color: #888; color: #fff; }
+.mm-select { width: auto !important; min-width: 130px; height: 34px; border: 1px solid #dcdcdc; border-radius: 8px; padding: 4px 8px; font-size: 13px; background: #fff; }
+.mm-wsjf { margin-left: auto; display: inline-flex; align-items: baseline; gap: 5px; }
+.mm-wsjf b { font-size: 22px; font-weight: 800; color: #CA001B; }
+.mm-wsjf span { font-size: 11px; color: #999; font-weight: 700; }
+
+.modal-people { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 22px; border-bottom: 1px solid #f0f0f0; }
+.mp-label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #999; }
+.mp-owner { width: auto !important; height: 32px; border: 1px solid #dcdcdc; border-radius: 8px; padding: 4px 8px; font-size: 13px; background: #fff; max-width: 220px; }
+.mp-sep { color: #ddd; }
+.people-chips { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.person-chip { display: inline-flex; align-items: center; gap: 5px; background: #f1f1f4; border-radius: 14px; padding: 2px 8px 2px 2px; font-size: 12px; }
+.pc-avatar { width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; color: #2b2b2b; }
+.pc-x { cursor: pointer; color: #999; font-size: 13px; }
+.pc-x:hover { color: #CA001B; }
+.pc-add-wrap { position: relative; display: inline-block; }
+.pc-add { border: 1px dashed #c2c2c2; background: #fff; border-radius: 50%; width: 22px; height: 22px; cursor: pointer; color: #666; font-size: 13px; line-height: 1; }
+.pc-add:hover { border-color: #CA001B; color: #CA001B; }
+.pc-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; background: #fff; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,0.12); min-width: 160px; max-height: 220px; overflow: auto; padding: 4px 0; }
+.pc-menu-item { padding: 6px 12px; font-size: 13px; cursor: pointer; }
+.pc-menu-item:hover { background: #f5f5f5; }
+.pc-menu-empty { padding: 8px 12px; color: #999; font-size: 12px; font-style: italic; }
+
+.modal-tabs { display: flex; gap: 2px; padding: 8px 18px 0; border-bottom: 1px solid #eee; }
+.modal-tabs button { border: none; background: transparent; padding: 8px 14px; font-size: 13px; font-weight: 700; color: #777; cursor: pointer; border-bottom: 2px solid transparent; }
+.modal-tabs button:hover { color: #333; }
+.modal-tabs button.active { color: #CA001B; border-bottom-color: #CA001B; }
+.tab-count { color: #aaa; font-weight: 600; font-size: 11px; }
+.modal-body2 { flex: 1; overflow-y: auto; padding: 18px 22px 24px; }
+.tabpane[hidden] { display: none; }
+.details-grid { display: grid; grid-template-columns: 1fr 360px; gap: 28px; }
+.dg-main, .dg-side { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.dg-two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.dg-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.dg-dates .field-label { display: flex; flex-direction: column; gap: 3px; }
+.dg-dates input { width: 100%; box-sizing: border-box; }
+.dg-meta-readonly { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: center; margin-top: 8px; }
+.dg-meta-readonly .field-label { margin: 0; }
+
 .field-label {
   display: block;
   font-size: 11px; text-transform: uppercase;

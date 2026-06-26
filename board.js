@@ -403,13 +403,12 @@
     const subCount = (State.subtasksByParent[task.TaskID] || []).length;
     const subDone  = (State.subtasksByParent[task.TaskID] || []).filter((s) => String(s.Done).toLowerCase() === "yes").length;
     const attCount = Number(task.AttachmentCount) || (State.attsByParent[task.TaskID] || []).length;
-    const isMilestone = String(task.IsMilestone).toLowerCase() === "yes";
     const health = task.Health || "";
     const healthDot = health ? `<span class="health-dot health-${statusSlug(health)}" title="${escapeAttr(health)}"></span>` : "";
 
     el.innerHTML = `
       <div class="kcard-head">
-        <span class="kcard-title" title="${escapeAttr(task.Title)}">${isMilestone ? '<span class="milestone-mark" title="Milestone">◆</span> ' : ""}${healthDot}${scheduleChip(task)}${escapeHtml(task.Title || "")}</span>
+        <span class="kcard-title" title="${escapeAttr(task.Title)}">${healthDot}${scheduleChip(task)}${escapeHtml(task.Title || "")}</span>
         <span class="wsjf-pill ${wsjfClass}">${wsjf.toFixed(1)}</span>
       </div>`;
     el.innerHTML += `
@@ -2113,10 +2112,11 @@
       document.getElementById(id).addEventListener("input", handler);
       document.getElementById(id).addEventListener("change", handler);
     });
-    // Health / Milestone / capacity readout
-    document.getElementById("m-health").addEventListener("change", markDirty);
-    document.getElementById("m-milestone").addEventListener("change", markDirty);
-    document.getElementById("m-quarter").addEventListener("change", updateCapacityReadout);
+    // Tab switching
+    Array.from(document.querySelectorAll("#m-tabs button")).forEach((b) => {
+      b.addEventListener("click", () => switchModalTab(b.dataset.tab));
+    });
+    document.getElementById("m-quarter").addEventListener("change", () => { updateCapacityReadout(); markDirty(); });
     document.getElementById("m-pct").addEventListener("input", (e) => {
       document.getElementById("m-pct-readout").textContent = e.target.value;
       markDirty();
@@ -2137,13 +2137,6 @@
       clearAttForm();
     });
     document.getElementById("m-att-save").addEventListener("click", saveNewAttachment);
-
-    // Activity collapse
-    document.getElementById("m-activity-toggle").addEventListener("click", (e) => {
-      const list = document.getElementById("m-activity-list");
-      list.hidden = !list.hidden;
-      e.target.textContent = (list.hidden ? "▸" : "▾") + " Activity";
-    });
 
     // Post an update (chronological note on the task)
     document.getElementById("m-update-add").addEventListener("click", async () => {
@@ -2190,6 +2183,31 @@
   }
 
   function markDirty() { modalDirty = true; }
+
+  function switchModalTab(tab) {
+    Array.from(document.querySelectorAll("#m-tabs button")).forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+    Array.from(document.querySelectorAll(".modal-body2 .tabpane")).forEach((p) => { p.hidden = p.dataset.pane !== tab; });
+  }
+
+  // Health as clickable flip pills (writes the hidden #m-health input).
+  const HEALTH_OPTS = [["", "—"], ["On Track", "🟢 On Track"], ["At Risk", "🟡 At Risk"], ["Off Track", "🔴 Off Track"]];
+  function renderHealthFlip() {
+    const wrap = document.getElementById("m-health-flip");
+    const cur = document.getElementById("m-health").value || "";
+    wrap.innerHTML = "";
+    HEALTH_OPTS.forEach(([val, label]) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "hp" + (cur === val ? " active" : "") + (val ? " hp-" + statusSlug(val) : "");
+      b.textContent = label;
+      b.addEventListener("click", () => {
+        document.getElementById("m-health").value = val;
+        renderHealthFlip();
+        markDirty();
+      });
+      wrap.appendChild(b);
+    });
+  }
 
   async function openEditModal(taskId) {
     State.modalOpen = true;
@@ -2342,10 +2360,11 @@
     fillSelect("m-quarter", State.config.Quarters, null, t.Quarter);
     fillSelect("m-status", State.config.Statuses, null, t.Status);
     document.getElementById("m-health").value = t.Health || "";
-    document.getElementById("m-milestone").checked = String(t.IsMilestone).toLowerCase() === "yes";
+    renderHealthFlip();
     updateCapacityReadout();
     const reschedRow = document.getElementById("m-reschedule");
     if (reschedRow) reschedRow.hidden = !t.TaskID;   // reschedule only existing tasks
+    switchModalTab("details");
 
     // Tags
     renderTagPills(String(t.Tags || "").split(";").map((x) => x.trim()).filter(Boolean));
@@ -2689,31 +2708,51 @@
     }
   }
 
-  // ───── Contributors (multi, excludes the selected Owner) ─────
+  // ───── Contributors (people chips + ＋, excludes the Owner) ─────
+  var currentContribList = [];
   function currentContributors() {
-    return Array.from(document.querySelectorAll("#m-contributors input:checked")).map((c) => c.value);
+    const owner = document.getElementById("m-owner").value;
+    return currentContribList.filter((p) => p && p !== owner);
   }
   function renderContributors(selected) {
+    if (selected) currentContribList = selected.filter(Boolean);
     const wrap = document.getElementById("m-contributors");
     if (!wrap) return;
     const owner = document.getElementById("m-owner").value;
-    const sel = new Set((selected || []).filter(Boolean));
-    const people = (State.config.Owners || []).filter((o) => o && o !== owner);
-    // Keep already-assigned contributors that aren't in the Owners list (renamed/
-    // removed person) so saving doesn't silently drop them.
-    sel.forEach((p) => { if (p !== owner && people.indexOf(p) < 0) people.push(p); });
+    currentContribList = currentContribList.filter((p) => p && p !== owner);  // owner can't be a contributor
     wrap.innerHTML = "";
-    if (!people.length) { wrap.innerHTML = '<span class="muted contrib-empty">No other people to add.</span>'; return; }
-    people.forEach((o) => {
-      const l = document.createElement("label");
-      l.className = "contrib-check";
-      const cb = document.createElement("input");
-      cb.type = "checkbox"; cb.value = o; cb.checked = sel.has(o);
-      cb.addEventListener("change", markDirty);
-      l.appendChild(cb);
-      l.appendChild(document.createTextNode(" " + o));
-      wrap.appendChild(l);
+    currentContribList.forEach((p) => {
+      const chip = document.createElement("span");
+      chip.className = "person-chip";
+      chip.innerHTML = '<span class="pc-avatar" style="background:' + colorHash(p) + '">' + initialsFromName(p) + '</span>' +
+        escapeHtml(p) + ' <span class="pc-x" title="Remove">×</span>';
+      chip.querySelector(".pc-x").addEventListener("click", () => {
+        currentContribList = currentContribList.filter((x) => x !== p);
+        renderContributors(); markDirty();
+      });
+      wrap.appendChild(chip);
     });
+    // ＋ add menu
+    const addWrap = document.createElement("span");
+    addWrap.className = "pc-add-wrap";
+    const addBtn = document.createElement("button");
+    addBtn.type = "button"; addBtn.className = "pc-add"; addBtn.textContent = "＋";
+    const menu = document.createElement("div");
+    menu.className = "pc-menu"; menu.hidden = true;
+    const avail = (State.config.Owners || []).filter((o) => o && o !== owner && currentContribList.indexOf(o) < 0);
+    if (!avail.length) menu.innerHTML = '<div class="pc-menu-empty">No more people</div>';
+    avail.forEach((o) => {
+      const item = document.createElement("div");
+      item.className = "pc-menu-item"; item.textContent = o;
+      item.addEventListener("click", () => {
+        currentContribList.push(o); menu.hidden = true; renderContributors(); markDirty();
+      });
+      menu.appendChild(item);
+    });
+    addBtn.addEventListener("click", (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; });
+    document.addEventListener("mousedown", (e) => { if (!addWrap.contains(e.target)) menu.hidden = true; });
+    addWrap.appendChild(addBtn); addWrap.appendChild(menu);
+    wrap.appendChild(addWrap);
   }
 
   // ───── Goals (multi, like workstreams) ─────
@@ -2921,7 +2960,6 @@
     t.Quarter            = document.getElementById("m-quarter").value;
     const newStatus      = document.getElementById("m-status").value;
     t.Health             = document.getElementById("m-health").value;
-    t.IsMilestone        = document.getElementById("m-milestone").checked ? "Yes" : "No";
     t.StartDate          = document.getElementById("m-start").value || "";
     t.DueDate            = document.getElementById("m-due").value || "";
     t.Tags               = currentTags().join("; ");
