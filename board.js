@@ -2864,6 +2864,7 @@
         <span class="drag" title="Drag to reorder">⋮⋮</span>
         <input type="checkbox" ${checked ? "checked" : ""} />
         <input type="text" class="subtask-text" value="${escapeAttr(s.Text || "")}" placeholder="Subtask…" />
+        ${s.SubtaskID ? '<button class="icon-btn st-open" title="Open subtask (updates, detail)">⤢</button>' : ''}
         <button class="icon-btn icon-trash" title="Delete">🗑</button>
       </div>
       <div class="st-meta">
@@ -2919,7 +2920,120 @@
       }
     });
 
+    const openBtn = li.querySelector(".st-open");
+    if (openBtn) openBtn.addEventListener("click", (e) => { e.stopPropagation(); openSubtaskModal(s); });
+
     return li;
+  }
+
+  // Dedicated subtask modal — full detail + its own chronological Updates feed.
+  // Opens on top of the task modal; saves back into currentSubtasks.
+  function openSubtaskModal(s) {
+    if (!s.SubtaskID) { toast("Save the task first to open this subtask.", "warn"); return; }
+    const host = document.createElement("div");
+    host.className = "modal-overlay st-modal-overlay";
+    const ownerList = (State.config.Owners || []).slice();
+    if (s.Owner && ownerList.indexOf(s.Owner) < 0) ownerList.push(s.Owner);
+    const ownerOpts = '<option value="">— owner —</option>' +
+      ownerList.map((o) => '<option value="' + escapeAttr(o) + '"' + (s.Owner === o ? " selected" : "") + '>' + escapeHtml(o) + '</option>').join("");
+    const checked = String(s.Done).toLowerCase() === "yes";
+    host.innerHTML =
+      '<div class="modal st-modal">' +
+        '<header class="modal-header">' +
+          '<input id="st-m-text" class="modal-title-input" value="' + escapeAttr(s.Text || "") + '" placeholder="Subtask…" />' +
+          '<button class="close-btn" id="st-m-close">×</button>' +
+        '</header>' +
+        '<div class="st-m-meta">' +
+          '<button type="button" id="st-m-done" class="st-done-toggle' + (checked ? " on" : "") + '">' + (checked ? "✓ Done" : "Mark done") + '</button>' +
+          '<label class="st-m-fl">👤 <select id="st-m-owner">' + ownerOpts + '</select></label>' +
+          '<label class="st-m-fl">📅 <input type="date" id="st-m-due" value="' + escapeAttr(isoDate(s.DueDate)) + '" /></label>' +
+          '<span class="st-m-doneon" id="st-m-doneon">' + (checked && s.CompletedDate ? "Completed " + escapeHtml(formatDateShort(s.CompletedDate)) : "") + '</span>' +
+        '</div>' +
+        '<div class="st-m-body">' +
+          '<h4 class="st-m-h">Updates</h4>' +
+          '<div id="st-m-updates" class="updates-list"></div>' +
+          '<div class="update-add">' +
+            '<textarea id="st-m-update-text" rows="2" placeholder="Add an update…"></textarea>' +
+            '<button class="btn btn-primary btn-sm" id="st-m-update-add">Post update</button>' +
+          '</div>' +
+        '</div>' +
+        '<footer class="modal-footer">' +
+          '<span style="flex:1"></span>' +
+          '<button class="btn btn-secondary" id="st-m-cancel">Close</button>' +
+          '<button class="btn btn-primary" id="st-m-save">Save</button>' +
+        '</footer>' +
+      '</div>';
+    document.body.appendChild(host);
+    function close() { host.remove(); }
+    host.addEventListener("click", (e) => { if (e.target === host) close(); });
+    host.querySelector("#st-m-close").addEventListener("click", close);
+    host.querySelector("#st-m-cancel").addEventListener("click", close);
+
+    let doneState = checked;
+    const doneBtn = host.querySelector("#st-m-done");
+    doneBtn.addEventListener("click", () => {
+      doneState = !doneState;
+      doneBtn.classList.toggle("on", doneState);
+      doneBtn.textContent = doneState ? "✓ Done" : "Mark done";
+    });
+
+    // Updates feed for this subtask.
+    function renderStUpdates(list) {
+      const ul = host.querySelector("#st-m-updates");
+      ul.innerHTML = "";
+      if (!list || !list.length) { ul.innerHTML = '<div class="updates-empty">No updates yet.</div>'; return; }
+      list.forEach((u) => {
+        const div = document.createElement("div");
+        div.className = "update-item";
+        div.innerHTML = '<div class="update-text">' + escapeHtml(u.Text || "") + '</div>' +
+          '<div class="update-meta">' + escapeHtml(u.AddedBy || "?") + ' · ' +
+          escapeHtml(formatDateShort(u.AddedDate)) + ' · ' + relTime(u.AddedDate) + '</div>';
+        ul.appendChild(div);
+      });
+    }
+    async function loadStUpdates() {
+      try { renderStUpdates(await window.WsjfData.readUpdatesForParent("Subtask", s.SubtaskID)); }
+      catch (e) { renderStUpdates([]); }
+    }
+    loadStUpdates();
+
+    const addBtn = host.querySelector("#st-m-update-add");
+    addBtn.addEventListener("click", async () => {
+      const ta = host.querySelector("#st-m-update-text");
+      const txt = ta.value.trim();
+      if (!txt) return;
+      addBtn.disabled = true;
+      try {
+        await window.WsjfData.createUpdate({ ParentType: "Subtask", ParentID: s.SubtaskID, Text: txt });
+        ta.value = "";
+        await loadStUpdates();
+      } catch (e) { toast("Update failed: " + e.message, "error"); }
+      addBtn.disabled = false;
+    });
+
+    host.querySelector("#st-m-save").addEventListener("click", async () => {
+      const newText = host.querySelector("#st-m-text").value.trim();
+      const newOwner = host.querySelector("#st-m-owner").value;
+      const newDue = host.querySelector("#st-m-due").value;
+      const saveBtn = host.querySelector("#st-m-save"); saveBtn.disabled = true; saveBtn.textContent = "Saving…";
+      try {
+        if (doneState !== checked) await window.WsjfData.toggleSubtask(s.SubtaskID, doneState);
+        await window.WsjfData.writeSubtask({ SubtaskID: s.SubtaskID, Text: newText, Owner: newOwner, DueDate: newDue });
+        s.Text = newText; s.Owner = newOwner; s.DueDate = newDue;
+        s.Done = doneState ? "Yes" : "No";
+        if (doneState && !s.CompletedDate) s.CompletedDate = new Date().toISOString().slice(0, 10);
+        if (!doneState) s.CompletedDate = "";
+        renderSubtasks();
+        if (typeof syncParentPctFromSubtasks === "function" && currentEditingTask) await syncParentPctFromSubtasks(currentEditingTask.TaskID);
+        toast("Subtask saved.", "info");
+        close();
+      } catch (e) {
+        saveBtn.disabled = false; saveBtn.textContent = "Save";
+        toast("Save failed: " + e.message, "error");
+      }
+    });
+
+    setTimeout(() => { const ti = host.querySelector("#st-m-text"); if (ti) ti.focus(); }, 0);
   }
 
   // Pull the live values out of the subtask inputs into currentSubtasks.
