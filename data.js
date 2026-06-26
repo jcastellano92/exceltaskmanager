@@ -20,6 +20,7 @@
   const ATT_TABLE   = "AttachmentsTable";
   const LOG_TABLE   = "ActivityLogTable";
   const UPD_TABLE   = "UpdatesTable";
+  const MS_TABLE    = "MilestonesTable";
   const CFG_SHEET   = "Config";
 
   // Next-ID is computed as MAX(existing id) + 1 straight from each table. This is
@@ -30,7 +31,8 @@
     Subtask:    { table: SUB_TABLE,   col: "SubtaskID" },
     Attachment: { table: ATT_TABLE,   col: "AttachmentID" },
     Log:        { table: LOG_TABLE,   col: "LogID" },
-    Update:     { table: UPD_TABLE,   col: "UpdateID" }
+    Update:     { table: UPD_TABLE,   col: "UpdateID" },
+    Milestone:  { table: MS_TABLE,    col: "MilestoneID" }
   };
 
   // ────────────────────────────────────────────────────────────
@@ -271,7 +273,7 @@
       if (Object.prototype.hasOwnProperty.call(taskObj, h)) updates[h] = taskObj[h];
     });
     // Optional columns not in the canonical header list (written only if present).
-    ["StartDate", "CommitmentID", "IsMilestone", "Health", "Slips"].forEach((h) => {
+    ["StartDate", "CommitmentID", "Health", "Slips"].forEach((h) => {
       if (Object.prototype.hasOwnProperty.call(taskObj, h)) updates[h] = taskObj[h];
     });
     updates.LastUpdated = ts;
@@ -355,7 +357,7 @@
     });
     // Optional columns not in the canonical header list (written only if the
     // column exists; harmlessly ignored otherwise).
-    ["StartDate", "CommitmentID", "IsMilestone", "Health", "Slips"].forEach((h) => {
+    ["StartDate", "CommitmentID", "Health", "Slips"].forEach((h) => {
       if (Object.prototype.hasOwnProperty.call(taskObj, h)) obj[h] = taskObj[h];
     });
 
@@ -679,6 +681,36 @@
     if (idx >= 0) { await _deleteRow(GOALS_TABLE, idx); await logActivity("Goal", id, "Deleted", "", "", "", ""); }
   }
 
+  // ----- Milestones (standalone dated lines on the roadmap — NOT tasks) -----
+  // Requires a MilestonesTable: MilestoneID, Title, Date, Quarter, GoalID, Color, Notes.
+  async function readMilestones() {
+    return _readTable(MS_TABLE);
+  }
+  async function createMilestone(obj) {
+    const id = await _readAndBumpNextId("Milestone");
+    await _appendObjByHeaders(MS_TABLE, {
+      MilestoneID: id,
+      Title: obj.Title || "",
+      Date: obj.Date || "",
+      Quarter: obj.Quarter || "",
+      GoalID: obj.GoalID || "",
+      Color: obj.Color || "",
+      Notes: obj.Notes || ""
+    });
+    await logActivity("Milestone", id, "Created", "", "", obj.Title || "", "");
+    return id;
+  }
+  async function updateMilestone(id, fields) {
+    const idx = await _findRowIndexById(MS_TABLE, "MilestoneID", id);
+    if (idx < 0) throw new Error("Milestone not found: " + id);
+    await _updateRowMulti(MS_TABLE, idx, fields);
+    await logActivity("Milestone", id, "Updated", "", "", fields.Title || "", "");
+  }
+  async function deleteMilestone(id) {
+    const idx = await _findRowIndexById(MS_TABLE, "MilestoneID", id);
+    if (idx >= 0) { await _deleteRow(MS_TABLE, idx); await logActivity("Milestone", id, "Deleted", "", "", "", ""); }
+  }
+
   // ────────────────────────────────────────────────────────────
   // Public API
   // ────────────────────────────────────────────────────────────
@@ -702,6 +734,8 @@
     renameOwner, renameQuarter,
     createWorkstream, updateWorkstream, deleteWorkstream,
     createGoal, updateGoal, deleteGoal,
+    // milestones (standalone roadmap lines)
+    readMilestones, createMilestone, updateMilestone, deleteMilestone,
     // activity
     logActivity,
     // expose for tests

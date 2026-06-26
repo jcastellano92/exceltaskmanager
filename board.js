@@ -28,7 +28,7 @@
     groupBy: "",                         // List view grouping: "" | WorkstreamID | Owner | Quarter | Status | GoalID
     listSort: { key: "WSJF", dir: "desc" }, // list view column sort
     listColFilters: {},                  // per-column filters (Sheets-style): key -> Set of allowed display values
-    filters: { owner: "", workstream: "", quarter: "", goal: "", health: "", subtasks: "", milestone: "",
+    filters: { owner: "", workstream: "", quarter: "", goal: "", health: "", subtasks: "",
                startFrom: "", startTo: "", dueFrom: "", dueTo: "", tags: new Set(), search: "" },
     selectedTags: new Set(),
     modalOpen: false,
@@ -171,7 +171,7 @@
     const checks = [
       { name: "TasksTable", sample: State.tasks[0],
         critical: ["TaskID", "Title", "Status", "Owner", "WorkstreamID", "Quarter", "WSJF", "PercentComplete", "DueDate"],
-        optional: ["StartDate", "Contributors", "GoalID", "Tags", "IsMilestone", "Health"] },
+        optional: ["StartDate", "Contributors", "GoalID", "Tags", "Health", "Slips"] },
       { name: "WorkstreamsTable", sample: State.workstreams[0],
         critical: ["WorkstreamID", "Name"], optional: ["Owner", "Status", "Goals", "Quarters", "Metric1"] },
       { name: "GoalsTable", sample: State.goals[0], critical: ["GoalID"], optional: ["ShortName", "GoalName"] },
@@ -951,7 +951,6 @@
             '<option value="pct">% complete</option>' +
             '<option value="startdate">Start date</option>' +
             '<option value="duedate">Due date</option>' +
-            '<option value="milestone">Milestone</option>' +
           '</select>' +
           '<div id="bulk-value" class="bulk-value"></div>' +
           '<button class="btn btn-primary btn-sm" id="bulk-apply" disabled>Apply</button>' +
@@ -997,10 +996,9 @@
       case "goal": wrap.innerHTML = sel((State.goals || []).map((g) => opt(g.GoalID, g.ShortName || g.GoalName || g.GoalID)).join("")); break;
       case "quarter": wrap.innerHTML = sel((State.config.Quarters || []).map((q) => opt(q, q)).join("")); break;
       case "pct": wrap.innerHTML = sel([0, 10, 20, 25, 30, 40, 50, 60, 70, 75, 80, 90, 100].map((p) => opt(String(p), p + "%")).join("")); break;
-      case "milestone": wrap.innerHTML = sel(opt("Yes", "◆ Milestone") + opt("No", "Not a milestone")); break;
       case "startdate":
       case "duedate": wrap.innerHTML = '<input type="date" class="filter" />'; break;
-      default: wrap.innerHTML = "";
+      default: wrap.innerHTML = ""; break;
     }
   }
 
@@ -1018,7 +1016,6 @@
       pct: 'set % complete to ' + val + '%',
       startdate: 'set start date to ' + val,
       duedate: 'set due date to ' + val,
-      milestone: val === "Yes" ? "mark as milestone" : "unmark milestone",
       earlier: 'accelerate one quarter (pull in)',
       later: 'delay one quarter (roll over)',
       archive: 'archive'
@@ -1027,7 +1024,7 @@
     if (!(await uiConfirm("Apply to " + ids.length + " task" + (ids.length === 1 ? "" : "s") + ": " + label + "?", { okText: "Apply" }))) return;
     toast("Updating " + ids.length + "…", "info");
     // Field-per-kind for the simple writeTask cases.
-    const FIELD = { owner: "Owner", health: "Health", workstream: "WorkstreamID", goal: "GoalID", quarter: "Quarter", pct: "PercentComplete", startdate: "StartDate", duedate: "DueDate", milestone: "IsMilestone" };
+    const FIELD = { owner: "Owner", health: "Health", workstream: "WorkstreamID", goal: "GoalID", quarter: "Quarter", pct: "PercentComplete", startdate: "StartDate", duedate: "DueDate" };
     let ok = 0, fail = 0;
     for (const id of ids) {
       try {
@@ -1090,7 +1087,6 @@
         if (!gids.includes(State.filters.goal)) return false;
       }
       if (State.filters.health && String(t.Health || "") !== State.filters.health) return false;
-      if (State.filters.milestone === "yes" && String(t.IsMilestone).toLowerCase() !== "yes") return false;
       if (State.filters.startFrom || State.filters.startTo) {
         const sIso = isoDate(t.StartDate);
         if (!sIso) return false;
@@ -2189,9 +2185,6 @@
     document.getElementById("filter-health").addEventListener("change", (e) => {
       State.filters.health = e.target.value; render();
     });
-    document.getElementById("filter-milestone").addEventListener("change", (e) => {
-      State.filters.milestone = e.target.value; render();
-    });
     [["filter-start-from", "startFrom"], ["filter-start-to", "startTo"],
      ["filter-due-from", "dueFrom"], ["filter-due-to", "dueTo"]].forEach(([id, key]) => {
       document.getElementById(id).addEventListener("change", (e) => {
@@ -2284,7 +2277,7 @@
   // ───── Active-filter chips (always-visible "what am I looking at") ─────
   function clearAllFilters() {
     const f = State.filters;
-    f.owner = ""; f.workstream = ""; f.quarter = ""; f.goal = ""; f.health = ""; f.subtasks = ""; f.milestone = "";
+    f.owner = ""; f.workstream = ""; f.quarter = ""; f.goal = ""; f.health = ""; f.subtasks = "";
     f.startFrom = ""; f.startTo = ""; f.dueFrom = ""; f.dueTo = ""; f.search = "";
     State.selectedTags.clear();
     State.listColFilters = {};        // also clear the List per-column filters
@@ -2302,7 +2295,6 @@
     set("filter-quarter", f.quarter);
     set("filter-goal", f.goal);
     set("filter-health", f.health);
-    set("filter-milestone", f.milestone);
     set("filter-subtasks", f.subtasks);
     set("filter-start-from", f.startFrom); set("filter-start-to", f.startTo);
     set("filter-due-from", f.dueFrom); set("filter-due-to", f.dueTo);
@@ -2327,7 +2319,6 @@
     if (f.goal)       chips.push({ label: "Goal: " + goalShort(f.goal), clear: () => { f.goal = ""; } });
     if (f.quarter)    chips.push({ label: "Quarter: " + f.quarter, clear: () => { f.quarter = ""; } });
     if (f.health)     chips.push({ label: "Health: " + f.health, clear: () => { f.health = ""; } });
-    if (f.milestone === "yes") chips.push({ label: "Milestones only", clear: () => { f.milestone = ""; } });
     if (f.startFrom)  chips.push({ label: "Start ≥ " + f.startFrom, clear: () => { f.startFrom = ""; } });
     if (f.startTo)    chips.push({ label: "Start ≤ " + f.startTo, clear: () => { f.startTo = ""; } });
     if (f.dueFrom)    chips.push({ label: "Due ≥ " + f.dueFrom, clear: () => { f.dueFrom = ""; } });
@@ -2346,7 +2337,7 @@
     }
 
     // Badge on the Filters button counts panel filters (not search, not column filters).
-    const panelCount = ["owner", "workstream", "quarter", "goal", "health", "subtasks", "milestone", "startFrom", "startTo", "dueFrom", "dueTo"]
+    const panelCount = ["owner", "workstream", "quarter", "goal", "health", "subtasks", "startFrom", "startTo", "dueFrom", "dueTo"]
       .reduce((n, k) => n + (f[k] ? 1 : 0), 0) + State.selectedTags.size;
     const badge = document.getElementById("filter-count");
     if (badge) { if (panelCount > 0) { badge.textContent = panelCount; badge.hidden = false; } else badge.hidden = true; }
