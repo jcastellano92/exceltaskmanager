@@ -44,7 +44,7 @@
     groupBy: "",                         // List view grouping: "" | WorkstreamID | Owner | Quarter | Status | GoalID
     listSort: { key: "WSJF", dir: "desc" }, // list view column sort
     listColFilters: {},                  // per-column filters (Sheets-style): key -> Set of allowed display values
-    filters: { owner: "", workstream: "", quarter: "", goal: "", health: "", subtasks: "",
+    filters: { owner: "", workstream: "", quarter: "", status: "", goal: "", health: "", subtasks: "",
                startFrom: "", startTo: "", dueFrom: "", dueTo: "", tags: new Set(), search: "" },
     selectedTags: new Set(),
     modalOpen: false,
@@ -267,6 +267,7 @@
       )
     );
     fillSelect("filter-quarter", ["", ...State.config.Quarters], "All Quarters");
+    fillSelect("filter-status", ["", ...boardColumns()], "All Statuses", State.filters.status);
     fillSelect("filter-goal",
       [{ value: "", label: "All Goals" }].concat(
         State.goals.map((g) => ({ value: g.GoalID, label: g.ShortName || g.GoalName || g.GoalID }))
@@ -1109,6 +1110,7 @@
       if (State.filters.owner && !String(t.Owner || "").includes(State.filters.owner)) return false;
       if (State.filters.workstream && t.WorkstreamID !== State.filters.workstream) return false;
       if (State.filters.quarter && t.Quarter !== State.filters.quarter) return false;
+      if (State.filters.status && String(t.Status || "") !== State.filters.status) return false;
       if (State.filters.goal) {
         const gids = String(t.GoalID || "").split(/[;,]/).map((s) => s.trim());
         if (!gids.includes(State.filters.goal)) return false;
@@ -2474,6 +2476,9 @@
     document.getElementById("filter-health").addEventListener("change", (e) => {
       State.filters.health = e.target.value; render();
     });
+    document.getElementById("filter-status").addEventListener("change", (e) => {
+      State.filters.status = e.target.value; render();
+    });
     [["filter-start-from", "startFrom"], ["filter-start-to", "startTo"],
      ["filter-due-from", "dueFrom"], ["filter-due-to", "dueTo"]].forEach(([id, key]) => {
       document.getElementById(id).addEventListener("change", (e) => {
@@ -2566,7 +2571,7 @@
   // ───── Active-filter chips (always-visible "what am I looking at") ─────
   function clearAllFilters() {
     const f = State.filters;
-    f.owner = ""; f.workstream = ""; f.quarter = ""; f.goal = ""; f.health = ""; f.subtasks = "";
+    f.owner = ""; f.workstream = ""; f.quarter = ""; f.status = ""; f.goal = ""; f.health = ""; f.subtasks = "";
     f.startFrom = ""; f.startTo = ""; f.dueFrom = ""; f.dueTo = ""; f.search = "";
     State.selectedTags.clear();
     State.listColFilters = {};        // also clear the List per-column filters
@@ -2582,6 +2587,7 @@
     set("filter-owner", f.owner);
     set("filter-workstream", f.workstream);
     set("filter-quarter", f.quarter);
+    set("filter-status", f.status);
     set("filter-goal", f.goal);
     set("filter-health", f.health);
     set("filter-subtasks", f.subtasks);
@@ -2607,6 +2613,7 @@
     if (f.workstream) chips.push({ label: "Workstream: " + workstreamName(f.workstream), clear: () => { f.workstream = ""; } });
     if (f.goal)       chips.push({ label: "Goal: " + goalShort(f.goal), clear: () => { f.goal = ""; } });
     if (f.quarter)    chips.push({ label: "Quarter: " + f.quarter, clear: () => { f.quarter = ""; } });
+    if (f.status)     chips.push({ label: "Status: " + f.status, clear: () => { f.status = ""; } });
     if (f.health)     chips.push({ label: "Health: " + f.health, clear: () => { f.health = ""; } });
     if (f.startFrom)  chips.push({ label: "Start ≥ " + f.startFrom, clear: () => { f.startFrom = ""; } });
     if (f.startTo)    chips.push({ label: "Start ≤ " + f.startTo, clear: () => { f.startTo = ""; } });
@@ -2626,7 +2633,7 @@
     }
 
     // Badge on the Filters button counts panel filters (not search, not column filters).
-    const panelCount = ["owner", "workstream", "quarter", "goal", "health", "subtasks", "startFrom", "startTo", "dueFrom", "dueTo"]
+    const panelCount = ["owner", "workstream", "quarter", "status", "goal", "health", "subtasks", "startFrom", "startTo", "dueFrom", "dueTo"]
       .reduce((n, k) => n + (f[k] ? 1 : 0), 0) + State.selectedTags.size;
     const badge = document.getElementById("filter-count");
     if (badge) { if (panelCount > 0) { badge.textContent = panelCount; badge.hidden = false; } else badge.hidden = true; }
