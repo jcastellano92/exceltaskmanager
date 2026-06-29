@@ -9,3 +9,6 @@ DASHBOARD-SPEC.md
 _harness.html
 _mock.js
 _*.png
+
+# Host-filled manifests for local sideloading (keep the public repo's host generic)
+manifest-*.local.xml
