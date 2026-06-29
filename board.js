@@ -2,8 +2,23 @@
 (function () {
   "use strict";
 
-  const COLUMNS = ["Backlog", "In Progress", "On Track", "Blocked", "Done"];
+  const COLUMNS = ["Backlog", "In Progress", "On Track", "Blocked", "Done"];   // default if StatusesTable is empty
   const POLL_MS = 30000;
+
+  // Board columns are driven by the StatusesTable (editable in Config), with an
+  // optional per-user column order remembered in localStorage. Falls back to the
+  // built-in defaults when the table is empty.
+  function boardColumns() {
+    let base = (State.config.Statuses && State.config.Statuses.length) ? State.config.Statuses.slice() : COLUMNS.slice();
+    try {
+      const saved = JSON.parse(lsGet("boardColOrder", "[]"));
+      if (saved && saved.length) {
+        base = saved.filter((s) => base.includes(s)).concat(base.filter((s) => !saved.includes(s)));
+      }
+    } catch (e) {}
+    return base;
+  }
+  function saveBoardColOrder(order) { lsSet("boardColOrder", JSON.stringify(order)); }
 
   // ───── State ─────
   const State = {
@@ -105,7 +120,7 @@
       "writeAttachment", "createAttachment", "deleteAttachment",
       "readConfigList", "addConfigValue", "renameConfigValue", "deleteConfigValue",
       "countTasksByField", "countTasksByWorkstream", "countTasksByGoal",
-      "renameOwner", "renameQuarter",
+      "renameOwner", "renameQuarter", "renameStatus",
       "createWorkstream", "updateWorkstream", "deleteWorkstream",
       "createGoal", "updateGoal", "deleteGoal", "logActivity",
       "createMilestone", "updateMilestone", "deleteMilestone"
@@ -129,7 +144,7 @@
       "writeSubtask", "createSubtask", "deleteSubtask", "toggleSubtask",
       "writeAttachment", "createAttachment", "deleteAttachment",
       "addConfigValue", "renameConfigValue", "deleteConfigValue",
-      "renameOwner", "renameQuarter",
+      "renameOwner", "renameQuarter", "renameStatus",
       "createWorkstream", "updateWorkstream", "deleteWorkstream",
       "createGoal", "updateGoal", "deleteGoal",
       "createMilestone", "updateMilestone", "deleteMilestone"
@@ -365,7 +380,7 @@
 
     const visible = computeVisibleTasks();
 
-    COLUMNS.forEach((status) => {
+    boardColumns().forEach((status) => {
       const col = document.createElement("section");
       col.className = "kcol kcol-" + statusSlug(status);
       col.dataset.status = status;
@@ -1545,8 +1560,9 @@
     const overdue = tasks.filter((t) => t.Status !== "Done" && isoDate(t.DueDate) && isoDate(t.DueDate) < todayIso).length;
     const pctDone = total ? Math.round((done / total) * 100) : 0;
     const avgWsjf = total ? (tasks.reduce((s, t) => s + (Number(t.WSJF) || 0), 0) / total) : 0;
+    const cols = boardColumns();
     const counts = {};
-    COLUMNS.forEach((s) => { counts[s] = tasks.filter((t) => t.Status === s).length; });
+    cols.forEach((s) => { counts[s] = tasks.filter((t) => t.Status === s).length; });
 
     const metrics = [w.Metric1, w.Metric2, w.Metric3].map((m) => String(m == null ? "" : m).trim()).filter(Boolean);
     const goals = String(w.Goals || "").split(/[;,]/).map((s) => s.trim()).filter(Boolean).map(goalLabel);
@@ -1580,10 +1596,10 @@
       (w.Owner ? '<div class="ws-owner">👤 ' + escapeHtml(w.Owner) + '</div>' : '') +
       (w.UserStory ? '<p class="ws-story">' + escapeHtml(w.UserStory) + '</p>' : '') +
       '<div class="ws-statbar" title="Status mix across this workstream’s tasks">' +
-        COLUMNS.map((s) => counts[s] ? '<span class="ws-seg ws-seg-' + statusSlug(s) + '" style="flex:' + counts[s] + '" title="' + escapeAttr(s + ": " + counts[s]) + '"></span>' : '').join('') +
+        cols.map((s) => counts[s] ? '<span class="ws-seg ws-seg-' + statusSlug(s) + '" style="flex:' + counts[s] + '" title="' + escapeAttr(s + ": " + counts[s]) + '"></span>' : '').join('') +
       '</div>' +
       '<div class="ws-progress-label"><b>' + done + ' / ' + total + '</b> done · ' + pctDone + '% · avg ' + avgPct + '% complete</div>' +
-      '<div class="ws-legend">' + COLUMNS.filter((s) => counts[s]).map((s) =>
+      '<div class="ws-legend">' + cols.filter((s) => counts[s]).map((s) =>
         '<span class="ws-leg"><i class="ws-seg-' + statusSlug(s) + '"></i>' + escapeHtml(s) + ' ' + counts[s] + '</span>').join('') + '</div>' +
       '<div class="ws-chips">' +
         '<span class="ws-chip">' + total + ' tasks</span>' +
@@ -2111,9 +2127,11 @@
     intro.className = "config-intro";
     intro.innerHTML =
       '<h2>Configuration</h2>' +
-      '<p class="muted">Add or rename Workstreams, Goals, Owners and Quarters. ' +
-      'Changes flow through to connected tasks. Statuses are fixed — they map to the board columns.</p>';
+      '<p class="muted">Add or rename Board columns, Workstreams, Goals, Owners and Quarters. ' +
+      'Changes flow through to connected tasks.</p>';
     root.appendChild(intro);
+
+    root.appendChild(configSectionStatuses());
 
     root.appendChild(configSectionIdName({
       title: "Workstreams",
@@ -2183,6 +2201,127 @@
     await loadConfigAndDimensions();
     await reloadTasks();
     render();
+  }
+
+  // Board columns (Statuses): rename (cascades to tasks), reorder (remembered),
+  // add, and delete-with-reassign (move that column's tasks elsewhere first).
+  function configSectionStatuses() {
+    const sec = document.createElement("section");
+    sec.className = "config-section";
+    const cols = boardColumns();
+    const h = document.createElement("h3");
+    h.textContent = "Board columns (" + cols.length + ")";
+    sec.appendChild(h);
+    const p = document.createElement("p");
+    p.className = "config-note";
+    p.textContent = "These are your Kanban columns. Rename cascades to every task. Use ▲▼ to set the column order (left→right). Delete lets you move that column's tasks to another column first.";
+    sec.appendChild(p);
+
+    const listEl = document.createElement("div");
+    listEl.className = "config-list";
+    const counts = {};
+    cols.forEach((s) => { counts[s] = State.tasks.filter((t) => t.Status === s).length; });
+
+    cols.forEach((val, idx) => {
+      const row = document.createElement("div");
+      row.className = "config-row";
+      const up = document.createElement("button");
+      up.className = "btn btn-secondary btn-sm"; up.textContent = "▲"; up.disabled = idx === 0; up.title = "Move left";
+      const down = document.createElement("button");
+      down.className = "btn btn-secondary btn-sm"; down.textContent = "▼"; down.disabled = idx === cols.length - 1; down.title = "Move right";
+      const input = document.createElement("input"); input.type = "text"; input.value = val;
+      const tag = document.createElement("span"); tag.className = "config-id"; tag.textContent = counts[val] + " task" + (counts[val] === 1 ? "" : "s");
+      const saveBtn = document.createElement("button"); saveBtn.className = "btn btn-secondary btn-sm"; saveBtn.textContent = "Rename";
+      const delBtn = document.createElement("button"); delBtn.className = "btn btn-archive btn-sm"; delBtn.textContent = "Delete";
+
+      const reorder = (from, to) => {
+        const arr = cols.slice();
+        const [m] = arr.splice(from, 1);
+        arr.splice(to, 0, m);
+        saveBoardColOrder(arr);
+        renderConfig();
+        renderBoardIfActive();
+      };
+      up.addEventListener("click", () => reorder(idx, idx - 1));
+      down.addEventListener("click", () => reorder(idx, idx + 1));
+
+      saveBtn.addEventListener("click", async () => {
+        const newV = input.value.trim();
+        if (!newV || newV === val) return;
+        if (!(await uiConfirm('Rename column "' + val + '" → "' + newV + '"? This updates every task with that status.', { okText: "Rename" }))) return;
+        configGuard(async () => {
+          const n = await window.WsjfData.renameStatus(val, newV);
+          // keep the saved order in sync with the new name
+          const arr = boardColumns().map((s) => (s === val ? newV : s));
+          saveBoardColOrder(arr);
+          toast("Renamed" + (typeof n === "number" ? " (" + n + " task" + (n === 1 ? "" : "s") + " moved)" : "") + ".", "info");
+          await afterConfigChange();
+        });
+      });
+
+      delBtn.addEventListener("click", async () => {
+        const n = counts[val];
+        if (n > 0) {
+          const others = cols.filter((s) => s !== val);
+          if (!others.length) { toast("Can't delete the only column.", "warn"); return; }
+          const target = await uiChoose(
+            'Delete "' + val + '" (' + n + ' task' + (n === 1 ? "" : "s") + ')',
+            "Move its tasks to another column, then delete it:",
+            others.map((s) => ({ value: s, label: "Move to “" + s + "”", cls: "btn-secondary" }))
+          );
+          if (!target) return;
+          configGuard(async () => {
+            toast("Moving " + n + " task" + (n === 1 ? "" : "s") + "…", "info");
+            for (const t of State.tasks.filter((x) => x.Status === val)) {
+              await window.WsjfData.writeTask({ TaskID: t.TaskID, Status: target }, { force: true, silent: true });
+            }
+            await window.WsjfData.deleteConfigValue("StatusesTable", val);
+            saveBoardColOrder(boardColumns().filter((s) => s !== val));
+            toast("Moved " + n + " to “" + target + "” and deleted “" + val + "”.", "info");
+            await afterConfigChange();
+          });
+        } else {
+          if (!(await uiConfirm('Delete empty column "' + val + '"?', { okText: "Delete" }))) return;
+          configGuard(async () => {
+            await window.WsjfData.deleteConfigValue("StatusesTable", val);
+            saveBoardColOrder(boardColumns().filter((s) => s !== val));
+            toast("Deleted “" + val + "”.", "info");
+            await afterConfigChange();
+          });
+        }
+      });
+
+      row.appendChild(up); row.appendChild(down);
+      row.appendChild(input); row.appendChild(tag);
+      row.appendChild(saveBtn); row.appendChild(delBtn);
+      listEl.appendChild(row);
+    });
+    sec.appendChild(listEl);
+
+    const addRow = document.createElement("div"); addRow.className = "config-row config-add";
+    const addInput = document.createElement("input"); addInput.type = "text"; addInput.placeholder = "New column (e.g. Planned)…";
+    const addBtn = document.createElement("button"); addBtn.className = "btn btn-primary btn-sm"; addBtn.textContent = "Add column";
+    const doAdd = () => {
+      const v = addInput.value.trim();
+      if (!v) return;
+      configGuard(async () => {
+        await window.WsjfData.addConfigValue("StatusesTable", v);
+        saveBoardColOrder(boardColumns().concat([v]));   // new column lands on the right; reorder with ▲
+        toast('Added “' + v + '”. Use ▲ to position it.', "info");
+        await afterConfigChange();
+      });
+    };
+    addBtn.addEventListener("click", doAdd);
+    addInput.addEventListener("keydown", (e) => { if (e.key === "Enter") doAdd(); });
+    addRow.appendChild(addInput); addRow.appendChild(addBtn);
+    sec.appendChild(addRow);
+    return sec;
+  }
+
+  // Re-render the board only if it's the active view (used after a column reorder
+  // so the change is visible immediately behind the Config screen too).
+  function renderBoardIfActive() {
+    if (State.viewMode === "board") renderBoard();
   }
 
   function configSectionValue(opts) {

@@ -649,6 +649,10 @@
     await renameConfigValue("QuartersTable", oldQ, newQ);
     return _cascadeTaskField("Quarter", oldQ, String(newQ).trim(), false);
   }
+  async function renameStatus(oldS, newS) {
+    await renameConfigValue("StatusesTable", oldS, newS);
+    return _cascadeTaskField("Status", oldS, String(newS).trim(), false);
+  }
 
   // ----- Workstreams / Goals (tasks link by ID; renaming Name auto-propagates) -----
   // These log meaningful create/update/delete activity (not trivial UI actions).
@@ -731,7 +735,7 @@
     // config admin (write)
     addConfigValue, renameConfigValue, deleteConfigValue,
     countTasksByField, countTasksByWorkstream, countTasksByGoal,
-    renameOwner, renameQuarter,
+    renameOwner, renameQuarter, renameStatus,
     createWorkstream, updateWorkstream, deleteWorkstream,
     createGoal, updateGoal, deleteGoal,
     // milestones (standalone roadmap lines)
