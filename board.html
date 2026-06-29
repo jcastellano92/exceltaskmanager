@@ -3,11 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Don't let the Office/Edge webview serve a stale board after an update -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <title>Product Management Tool</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
   <!-- Self-hosted (a CDN reference here gets blocked on locked-down corporate networks, which silently kills drag-and-drop). -->
-  <script src="sortable.min.js"></script>
-  <link rel="stylesheet" href="board.css" />
+  <script src="sortable.min.js?v=20260629a"></script>
+  <link rel="stylesheet" href="board.css?v=20260629a" />
 </head>
 <body>
 
@@ -304,7 +308,7 @@
 <!-- toasts -->
 <div id="toast-host" class="toast-host"></div>
 
-<script src="data.js"></script>
-<script src="board.js"></script>
+<script src="data.js?v=20260629a"></script>
+<script src="board.js?v=20260629a"></script>
 </body>
 </html>

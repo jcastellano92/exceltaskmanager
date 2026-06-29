@@ -1321,11 +1321,18 @@
     const todayIso = new Date().toISOString().slice(0, 10);
     const dIso = isoDate(t.DueDate);
     const isOverdue = dIso && dIso < todayIso && t.Status !== "Done";
+    const owner = String(t.Owner || "").trim();
+    const ownerHtml = owner
+      ? '<span class="mine-owner"><span class="avatar avatar-sm" style="background:' + colorHash(owner) + '" title="' + escapeAttr(owner) + '">' + initialsFromName(owner) + '</span>' + escapeHtml(owner.split(" ")[0]) + '</span>'
+      : "";
+    const wsName = workstreamName(t.WorkstreamID);
     const row = document.createElement("div");
     row.className = "mine-row";
     row.innerHTML =
       '<span class="wsjf-pill ' + wsjfPillClass(wsjf) + '">' + wsjf.toFixed(1) + '</span>' +
       '<span class="mine-row-title">' + escapeHtml(t.Title || "") + '</span>' +
+      (wsName && wsName !== "—" ? '<span class="mine-ws" title="' + escapeAttr(wsName) + '">' + escapeHtml(wsName) + '</span>' : "") +
+      ownerHtml +
       '<span class="status-chip status-' + statusSlug(t.Status) + '">' + escapeHtml(t.Status || "") + '</span>' +
       (dIso ? '<span class="mine-due' + (isOverdue ? " overdue" : "") + '">📅 ' + escapeHtml(formatDateShort(t.DueDate)) + '</span>' : "") +
       (subs.length ? '<span class="mine-sub">✓ ' + subDone + '/' + subs.length + '</span>' : "") +

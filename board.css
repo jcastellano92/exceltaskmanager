@@ -908,6 +908,8 @@ html, body {
 .mine-row-title { flex: 1; font-weight: 600; color: #222; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mine-due { font-size: 12px; color: #666; white-space: nowrap; }
 .mine-due.overdue { color: #CA001B; font-weight: 700; }
+.mine-ws { font-size: 11px; font-weight: 700; color: #555; background: #eef0f3; border-radius: 6px; padding: 2px 8px; white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.mine-owner { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #555; white-space: nowrap; }
 .mine-sub { font-size: 12px; color: #666; font-weight: 600; }
 .mine-pct { font-size: 12px; color: #666; min-width: 40px; text-align: right; }
 
