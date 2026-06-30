@@ -1098,13 +1098,36 @@ html, body {
 .rm-ms-flag:hover .rm-ms-flaglabel { background: #eef2ff; }
 .rm-ms-empty { position: absolute; left: 10px; top: 7px; font-size: 11px; color: #b0b0b8; font-style: italic; }
 
-/* Subtask lane (roadmap accordion) */
-.rm-caret { border: none; background: none; cursor: pointer; color: #888; font-size: 11px; padding: 0 2px; }
-.rm-subrow { height: 24px; background: #fbfcfe; }
-.rm-sublabel { font-size: 11px; color: #777; padding-left: 22px; }
-.rm-subbar { position: absolute; top: 9px; height: 6px; border-radius: 3px; background: #b9c2d0; z-index: 2; }
+/* Group tabs (Operations / Portfolio …) */
+.rm-tabs { display: flex; gap: 4px; margin: 0 0 10px; border-bottom: 1px solid #eaeaea; }
+.rm-tab { border: none; background: none; cursor: pointer; padding: 8px 16px; font-size: 14px; font-weight: 700; color: #777; border-bottom: 2px solid transparent; }
+.rm-tab:hover { color: #333; }
+.rm-tab.active { color: #CA001B; border-bottom-color: #CA001B; }
+
+/* Workstream swimlanes (left = workstream, right = its tasks across the quarters) */
+.rm-wslane { display: grid; grid-template-columns: 210px 1fr; border-bottom: 2px solid #eef0f3; align-items: stretch; }
+.rm-wslabel {
+  display: flex; flex-direction: column; justify-content: center; gap: 2px;
+  padding: 8px 10px; border-right: 1px solid #eee; background: #fafafb; min-width: 0;
+}
+.rm-wsname { font-size: 13px; font-weight: 800; color: #2a2a2a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rm-wsowner { font-size: 11px; color: #777; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rm-wsmeta { font-size: 11px; color: #aaa; font-weight: 700; }
+.rm-wsrows {
+  position: relative;
+  background: repeating-linear-gradient(90deg, #eee 0 1px, transparent 1px 25%);
+  border-left: 1px solid #eee;
+  padding: 3px 0;
+}
+.rm-trow { position: relative; height: 28px; }
+
+/* Subtask lane (roadmap accordion) — now nested inside a workstream lane */
+.rm-bar-caret { position: relative; cursor: pointer; color: #fff; font-size: 11px; padding: 0 3px 0 6px; text-shadow: 0 1px 1px rgba(0,0,0,.35); z-index: 4; }
+.rm-trow.rm-subrow { height: 22px; }
+.rm-sublabel-in { position: absolute; top: 3px; transform: translateX(8px); font-size: 10px; color: #6b7280; background: rgba(255,255,255,.82); padding: 0 4px; border-radius: 3px; white-space: nowrap; pointer-events: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
+.rm-subbar { position: absolute; top: 8px; height: 6px; border-radius: 3px; background: #b9c2d0; z-index: 2; }
 .rm-subbar.done { background: #9ed3b4; }
-.rm-subdot { position: absolute; top: 6px; transform: translateX(-50%); width: 10px; height: 10px; border-radius: 50%; background: #6b7686; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.12); z-index: 3; }
+.rm-subdot { position: absolute; top: 5px; transform: translateX(-50%); width: 10px; height: 10px; border-radius: 50%; background: #6b7686; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.12); z-index: 3; }
 .rm-subdot.done { background: #3bb273; }
 
 /* Hover card + drag date tooltip */

@@ -38,7 +38,7 @@
     expandedSubtasks: new Set(),         // taskIds whose subtask checklist is expanded inline (board + list)
     milestones: [],                      // standalone roadmap milestone lines (MilestonesTable)
     allUpdates: [],                      // every Updates row (for the My Tasks "recent updates" feed)
-    roadmap: { showDates: true, expanded: new Set() }, // roadmap prefs: drag date tooltip + expanded subtask lanes
+    roadmap: { showDates: true, expanded: new Set(), group: "" }, // roadmap prefs: drag date tooltip + expanded subtask lanes + selected group tab
     selected: new Set(),                 // taskIds selected in List view for bulk actions
     sort: "wsjf",                        // board column sort: "wsjf" | "due" | "manual"
     groupBy: "",                         // List view grouping: "" | WorkstreamID | Owner | Quarter | Status | GoalID
@@ -1777,9 +1777,27 @@
       return { s: s, e: e };
     }
 
-    const order = State.workstreams.map((w) => w.WorkstreamID)
+    // Which workstream group does a workstream belong to?
+    const wsGroupOf = (wid) => {
+      const w = State.workstreams.find((x) => x.WorkstreamID === wid);
+      return (w && String(w.Group || "").trim()) || "Other";
+    };
+    // Workstreams (in order) that have visible tasks, + a bucket for no-workstream tasks.
+    const wsWithTasks = State.workstreams.map((w) => w.WorkstreamID)
       .filter((id) => visible.some((t) => t.WorkstreamID === id));
-    if (visible.some((t) => !order.includes(t.WorkstreamID))) order.push("");
+    const hasNoWs = visible.some((t) => !State.workstreams.some((w) => w.WorkstreamID === t.WorkstreamID));
+
+    // Group tabs (like the board's view tabs) — Operations / Portfolio / …
+    const groups = [];
+    wsWithTasks.forEach((id) => { const g = wsGroupOf(id); if (!groups.includes(g)) groups.push(g); });
+    if (hasNoWs && !groups.includes("Other")) groups.push("Other");
+    let sel = State.roadmap.group || lsGet("rmGroup", "");
+    if (!groups.includes(sel)) sel = groups[0] || "Other";
+    State.roadmap.group = sel;
+
+    // Lanes (workstreams) shown for the selected group.
+    const laneIds = wsWithTasks.filter((id) => wsGroupOf(id) === sel);
+    if (sel === "Other" && hasNoWs) laneIds.push("");
 
     // Goal legend (distinct colour per goal drives the bar colours).
     const usedGoals = [];
@@ -1791,9 +1809,17 @@
     let html = '<div class="rm-head"><h2>Roadmap</h2>' +
       '<div class="rm-head-right">' +
         '<label class="rm-toggle"><input type="checkbox" id="rm-show-dates"' + (State.roadmap.showDates ? " checked" : "") + '> Date tooltip on drag</label>' +
-        '<span class="mine-who">' + visible.length + ' items · ' + escapeHtml(yearStart.slice(0, 4)) + '</span>' +
+        '<span class="mine-who">' + escapeHtml(yearStart.slice(0, 4)) + '</span>' +
       '</div></div>';
-    html += '<div class="rm-legend">' + legend + '<span class="rm-leg-hint">Drag a bar to move it · drag its edges to resize · click to open</span></div>';
+
+    // Group tabs.
+    if (groups.length > 1) {
+      html += '<div class="rm-tabs">' + groups.map((g) =>
+        '<button type="button" class="rm-tab' + (g === sel ? " active" : "") + '" data-rm-group="' + escapeAttr(g) + '">' +
+        escapeHtml(g) + '</button>').join("") + '</div>';
+    }
+
+    html += '<div class="rm-legend">' + legend + '<span class="rm-leg-hint">Drag a bar to move it · drag its edges to resize · click to open · ▸ for subtasks</span></div>';
     html += '<div class="rm-scroll"><div class="rm">';
 
     // Milestone vertical guide-lines spanning every track (overlay).
@@ -1805,7 +1831,7 @@
     }
 
     // Axis (quarter columns + today).
-    html += '<div class="rm-row rm-axis-row"><div class="rm-row-label"></div><div class="rm-row-track rm-axis-track">' +
+    html += '<div class="rm-row rm-axis-row"><div class="rm-row-label">Workstream</div><div class="rm-row-track rm-axis-track">' +
       ["Q1", "Q2", "Q3", "Q4"].map((q) => '<span class="rm-qcol">' + q + '</span>').join("") +
       '<div class="rm-today" style="left:' + todayPct + '%" title="Today"></div></div></div>';
 
@@ -1827,66 +1853,75 @@
         '<div class="rm-row-track"><span class="rm-ms-empty">No milestones — add a dated line</span><div class="rm-today" style="left:' + todayPct + '%"></div></div></div>';
     }
 
+    // One swimlane per workstream: label on the left, its tasks stacked across the
+    // quarter timeline on the right (each a draggable/resizable bar).
     let any = false;
-    order.forEach((wid) => {
+    const barHtml = (t) => {
+      const r = rng(t);
+      const left = pctOf(r.s), width = Math.max(1.5, pctOf(r.e) - left);
+      const pct = Math.max(0, Math.min(100, Number(t.PercentComplete) || 0));
+      const gc = goalColor(taskGoalIds(t)[0] || "");
+      const hl = t.Health ? " rm-h-" + statusSlug(t.Health) : "";
+      const blocked = t.Status === "Blocked" ? " rm-blocked" : "";
+      const subs = State.subtasksByParent[t.TaskID] || [];
+      const expanded = State.roadmap.expanded.has(Number(t.TaskID));
+      const caret = subs.length
+        ? '<span class="rm-bar-caret" data-rm-exp="' + t.TaskID + '" title="Subtasks">' + (expanded ? "▾" : "▸") + '</span>'
+        : '';
+      return '<div class="rm-trow" data-task-id="' + t.TaskID + '">' +
+        '<div class="rm-bar' + hl + blocked + '" style="left:' + left + '%;width:' + width + '%;background:' + gc + '" data-task-id="' + t.TaskID + '" title="' + escapeAttr(t.Title) + '">' +
+          '<span class="rm-handle rm-handle-l" data-grip="l"></span>' +
+          '<span class="rm-bar-fill" style="width:' + pct + '%"></span>' +
+          caret + scheduleChip(t) +
+          '<span class="rm-bar-label">' + escapeHtml(t.Title || "") + '</span>' +
+          '<span class="rm-handle rm-handle-r" data-grip="r"></span>' +
+        '</div></div>' +
+        (expanded ? subs.slice().sort((a, b) => (Number(a.Order) || 0) - (Number(b.Order) || 0)).map((s) => {
+          const done2 = String(s.Done).toLowerCase() === "yes";
+          const due = isoDate(s.DueDate);
+          const sr = due ? pctOf(due) : pctOf(r.e);
+          const sw = Math.max(1.2, sr - left);
+          const stip = escapeAttr((s.Text || "Subtask") + (due ? " · due " + formatDateShort(due) : "") + (done2 ? " · done" : ""));
+          return '<div class="rm-trow rm-subrow">' +
+            '<div class="rm-subbar' + (done2 ? " done" : "") + '" style="left:' + left + '%;width:' + sw + '%" title="' + stip + '"></div>' +
+            '<div class="rm-subdot' + (done2 ? " done" : "") + '" style="left:' + sr + '%" title="' + stip + '"></div>' +
+            '<span class="rm-sublabel-in" style="left:' + left + '%" title="' + escapeAttr(s.Text || "") + '">↳ ' + escapeHtml(s.Text || "") + '</span></div>';
+        }).join("") : "");
+    };
+
+    laneIds.forEach((wid) => {
       const tasks = visible.filter((t) => t.WorkstreamID === wid)
         .sort((a, b) => { const ra = rng(a).s, rb = rng(b).s; return ra < rb ? -1 : ra > rb ? 1 : 0; });
       if (!tasks.length) return;
       any = true;
       const done = tasks.filter((t) => t.Status === "Done").length;
-      html += '<div class="rm-group"><span class="rm-group-name">' +
-        escapeHtml(workstreamName(wid) || "(no workstream)") + '</span><span class="rm-group-meta">' +
-        done + '/' + tasks.length + ' done</span></div>';
-      tasks.forEach((t) => {
-        const r = rng(t);
-        const left = pctOf(r.s), width = Math.max(1.5, pctOf(r.e) - left);
-        const pct = Math.max(0, Math.min(100, Number(t.PercentComplete) || 0));
-        const gc = goalColor(taskGoalIds(t)[0] || "");
-        const hl = t.Health ? " rm-h-" + statusSlug(t.Health) : "";
-        const blocked = t.Status === "Blocked" ? " rm-blocked" : "";
-        const subs = State.subtasksByParent[t.TaskID] || [];
-        const expanded = State.roadmap.expanded.has(Number(t.TaskID));
-        const caret = subs.length
-          ? '<button class="rm-caret" data-rm-exp="' + t.TaskID + '" title="Subtasks">' + (expanded ? "▾" : "▸") + '</button> '
-          : '';
-        const bar = '<div class="rm-bar' + hl + blocked + '" style="left:' + left + '%;width:' + width + '%;background:' + gc + '" data-task-id="' + t.TaskID + '">' +
-          '<span class="rm-handle rm-handle-l" data-grip="l"></span>' +
-          '<span class="rm-bar-fill" style="width:' + pct + '%"></span>' +
-          '<span class="rm-bar-label">' + escapeHtml(t.Title || "") + '</span>' +
-          '<span class="rm-handle rm-handle-r" data-grip="r"></span></div>';
-        html += '<div class="rm-row" data-task-id="' + t.TaskID + '">' +
-          '<div class="rm-row-label" title="' + escapeAttr(t.Title) + '">' + caret + scheduleChip(t) + escapeHtml(t.Title || "") + '</div>' +
-          '<div class="rm-row-track">' + bar + '<div class="rm-today" style="left:' + todayPct + '%"></div></div></div>';
-
-        // Subtask lane (accordion) — thin bars from parent start to each subtask due.
-        if (expanded) {
-          subs.slice().sort((a, b) => (Number(a.Order) || 0) - (Number(b.Order) || 0)).forEach((s) => {
-            const done2 = String(s.Done).toLowerCase() === "yes";
-            const due = isoDate(s.DueDate);
-            const sl = left;
-            const sr = due ? pctOf(due) : pctOf(r.e);
-            const sw = Math.max(1.2, sr - sl);
-            const stip = escapeAttr((s.Text || "Subtask") + (due ? " · due " + formatDateShort(due) : "") + (done2 ? " · done" : ""));
-            html += '<div class="rm-row rm-subrow"><div class="rm-row-label rm-sublabel" title="' + escapeAttr(s.Text || "") + '">↳ ' +
-              escapeHtml(s.Text || "") + '</div><div class="rm-row-track">' +
-              '<div class="rm-subbar' + (done2 ? " done" : "") + '" style="left:' + sl + '%;width:' + sw + '%" title="' + stip + '"></div>' +
-              '<div class="rm-subdot' + (done2 ? " done" : "") + '" style="left:' + sr + '%" title="' + stip + '"></div>' +
-              '<div class="rm-today" style="left:' + todayPct + '%"></div></div></div>';
-          });
-        }
-      });
+      const w = State.workstreams.find((x) => x.WorkstreamID === wid);
+      const owner = w && w.Owner ? String(w.Owner).split(/[;,]/)[0].trim() : "";
+      html += '<div class="rm-wslane">' +
+        '<div class="rm-wslabel" title="' + escapeAttr(workstreamName(wid)) + '">' +
+          '<span class="rm-wsname">' + escapeHtml(workstreamName(wid) || "No workstream") + '</span>' +
+          (owner ? '<span class="rm-wsowner">👤 ' + escapeHtml(owner) + '</span>' : '') +
+          '<span class="rm-wsmeta">' + done + '/' + tasks.length + ' done</span>' +
+        '</div>' +
+        '<div class="rm-wsrows">' + tasks.map(barHtml).join("") +
+          '<div class="rm-today" style="left:' + todayPct + '%"></div></div>' +
+      '</div>';
     });
     html += '</div></div>';
-    if (!any) html += '<div class="mine-empty">No items match your filters. Milestones still show above.</div>';
+    if (!any) html += '<div class="mine-empty">No tasks in “' + escapeHtml(sel) + '”. Milestones still show above.</div>';
     html += '<div class="rm-hovercard" id="rm-hovercard" hidden></div>';
     html += '<div class="rm-dragtip" id="rm-dragtip" hidden></div>';
     root.innerHTML = html;
 
+    // Group tabs.
+    Array.from(root.querySelectorAll(".rm-tab[data-rm-group]")).forEach((b) => {
+      b.addEventListener("click", () => { State.roadmap.group = b.dataset.rmGroup; lsSet("rmGroup", b.dataset.rmGroup); renderRoadmap(); });
+    });
     // Date-tooltip toggle.
     const showDatesCb = document.getElementById("rm-show-dates");
     if (showDatesCb) showDatesCb.addEventListener("change", () => { State.roadmap.showDates = showDatesCb.checked; });
 
-    // Add-milestone button.
+    // Add / edit milestones.
     const addMs = document.getElementById("rm-add-ms");
     if (addMs) addMs.addEventListener("click", (e) => { e.stopPropagation(); openMilestoneEditor(null); });
     Array.from(root.querySelectorAll(".rm-ms-flag[data-ms-id]")).forEach((f) => {
@@ -1896,25 +1931,17 @@
         if (m) openMilestoneEditor(m);
       });
     });
-
-    // Row label click → open modal (track clicks are for dragging).
-    Array.from(root.querySelectorAll(".rm-row[data-task-id] .rm-row-label")).forEach((lab) => {
-      lab.addEventListener("click", (e) => {
-        if (e.target.closest(".rm-caret")) return;
-        openEditModal(Number(lab.closest(".rm-row").dataset.taskId));
-      });
-    });
-    // Subtask accordion carets.
-    Array.from(root.querySelectorAll(".rm-caret[data-rm-exp]")).forEach((b) => {
-      b.addEventListener("click", (e) => {
+    // Subtask accordion carets (on the bars).
+    Array.from(root.querySelectorAll(".rm-bar-caret[data-rm-exp]")).forEach((c) => {
+      c.addEventListener("click", (e) => {
         e.stopPropagation();
-        const id = Number(b.dataset.rmExp);
+        const id = Number(c.dataset.rmExp);
         if (State.roadmap.expanded.has(id)) State.roadmap.expanded.delete(id);
         else State.roadmap.expanded.add(id);
         renderRoadmap();
       });
     });
-    // Bars: hover card + drag/resize.
+    // Bars: hover card + drag/resize (+ click opens the task).
     Array.from(root.querySelectorAll(".rm-bar[data-task-id]")).forEach((bar) => {
       const task = State.tasks.find((x) => Number(x.TaskID) === Number(bar.dataset.taskId));
       if (!task) return;
@@ -1955,6 +1982,7 @@
   function wireRoadmapDrag(bar, task, ctx) {
     bar.addEventListener("pointerdown", (ev) => {
       if (ev.button !== 0) return;
+      if (ev.target.closest(".rm-bar-caret")) return;   // caret toggles subtasks, never drags
       ev.preventDefault();
       const grip = ev.target.closest(".rm-handle");
       const mode = grip ? (grip.dataset.grip === "l" ? "resize-l" : "resize-r") : "move";
@@ -1992,8 +2020,8 @@
         bar.classList.remove("rm-bar-dragging");
         if (tip) tip.hidden = true;
         const nl = parseFloat(bar.style.left) || 0, nw = parseFloat(bar.style.width) || 1;
-        setTimeout(() => { State._rmDragging = false; }, 0);   // let the click handler see it
-        if (!moved) return;                                    // a plain click — row-label handler opens modal
+        setTimeout(() => { State._rmDragging = false; }, 0);
+        if (!moved) { openEditModal(Number(task.TaskID)); return; }   // a plain click opens the task
         commitRoadmapDates(task, ctx.isoFromPct(nl), ctx.isoFromPct(nl + nw));
       }
       document.addEventListener("pointermove", onMove);
