@@ -221,12 +221,14 @@ html, body {
   display: flex; align-items: center; justify-content: space-between;
   font-weight: 700; font-size: 13px; color: #444;
   border-bottom: 1px solid rgba(0,0,0,0.06);
+  border-top: 3px solid var(--sc, transparent);   /* status colour accent */
   position: sticky; top: 0;
   background: inherit;
   z-index: 5;
   border-radius: 8px 8px 0 0;
 }
-.kcol-title { text-transform: uppercase; letter-spacing: .03em; }
+.kcol-title { display: inline-flex; align-items: center; gap: 6px; text-transform: uppercase; letter-spacing: .03em; }
+.kcol-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--sc, #888); display: inline-block; }
 .kcol-count { color: #888; font-weight: 600; font-size: 12px; }
 
 .kcol-body {
@@ -872,16 +874,14 @@ html, body {
 .cf-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cf-actions { display: flex; justify-content: flex-end; gap: 6px; border-top: 1px solid #eee; padding-top: 8px; }
 
+/* Unified status chip: neutral pill + a dot in the status colour (--sc) */
 .status-chip {
-  display: inline-block; padding: 2px 8px; border-radius: 999px;
-  font-size: 11px; font-weight: 600; white-space: nowrap;
-  background: #eef0f2; color: #555;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 9px 2px 7px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; white-space: nowrap;
+  background: #f1f3f5; color: #444;
 }
-.status-chip.status-backlog     { background: #eef0f2; color: #555; }
-.status-chip.status-in-progress { background: #fff0cc; color: #855900; }
-.status-chip.status-on-track    { background: #d6ecff; color: #0b5cab; }
-.status-chip.status-blocked     { background: #ffd9d9; color: #8b0000; }
-.status-chip.status-done        { background: #d6f5e0; color: #137a3e; }
+.status-chip .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--sc, #888); flex: 0 0 auto; }
 
 /* ───────── My Tasks dashboard ───────── */
 .mineview { height: calc(100vh - 56px); overflow: auto; padding: 20px 24px; }
@@ -949,6 +949,9 @@ html, body {
 .ws-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 10.5px; color: #777; }
 .ws-leg { display: inline-flex; align-items: center; gap: 4px; }
 .ws-leg i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+
+/* Config: per-status colour swatch */
+.status-swatch { width: 34px; height: 30px; padding: 2px; border: 1px solid #d4d4d8; border-radius: 8px; background: #fff; cursor: pointer; flex: 0 0 auto; }
 
 /* Workstream groups (collapsible) */
 .ws-grid-head-right { display: inline-flex; align-items: center; gap: 12px; }

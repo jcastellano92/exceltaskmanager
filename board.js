@@ -10,12 +10,16 @@
   // built-in defaults when the table is empty.
   function boardColumns() {
     let base = (State.config.Statuses && State.config.Statuses.length) ? State.config.Statuses.slice() : COLUMNS.slice();
-    try {
-      const saved = JSON.parse(lsGet("boardColOrder", "[]"));
-      if (saved && saved.length) {
-        base = saved.filter((s) => base.includes(s)).concat(base.filter((s) => !saved.includes(s)));
-      }
-    } catch (e) {}
+    // With an Order column the table is the source of truth; otherwise fall back to
+    // a per-device remembered order.
+    if (!State.statusHasOrder) {
+      try {
+        const saved = JSON.parse(lsGet("boardColOrder", "[]"));
+        if (saved && saved.length) {
+          base = saved.filter((s) => base.includes(s)).concat(base.filter((s) => !saved.includes(s)));
+        }
+      } catch (e) {}
+    }
     return base;
   }
   function saveBoardColOrder(order) { lsSet("boardColOrder", JSON.stringify(order)); }
@@ -28,6 +32,7 @@
     attsByParent: {},
     activityByParent: {},
     config: { Owners: [], Statuses: [], Quarters: [], Types: [], YesNo: [] },
+    statusColors: {},                    // status name → colour (optional Color column on StatusesTable)
     goals: [],
     workstreams: [],
     view: "all",                         // always show all tasks; narrow with the filters
@@ -120,7 +125,7 @@
       "writeAttachment", "createAttachment", "deleteAttachment",
       "readConfigList", "addConfigValue", "renameConfigValue", "deleteConfigValue",
       "countTasksByField", "countTasksByWorkstream", "countTasksByGoal",
-      "renameOwner", "renameQuarter", "renameStatus",
+      "renameOwner", "renameQuarter", "renameStatus", "setStatusColor", "setStatusOrder",
       "createWorkstream", "updateWorkstream", "deleteWorkstream",
       "createGoal", "updateGoal", "deleteGoal", "logActivity",
       "createMilestone", "updateMilestone", "deleteMilestone"
@@ -144,7 +149,7 @@
       "writeSubtask", "createSubtask", "deleteSubtask", "toggleSubtask",
       "writeAttachment", "createAttachment", "deleteAttachment",
       "addConfigValue", "renameConfigValue", "deleteConfigValue",
-      "renameOwner", "renameQuarter", "renameStatus",
+      "renameOwner", "renameQuarter", "renameStatus", "setStatusColor", "setStatusOrder",
       "createWorkstream", "updateWorkstream", "deleteWorkstream",
       "createGoal", "updateGoal", "deleteGoal",
       "createMilestone", "updateMilestone", "deleteMilestone"
@@ -229,6 +234,31 @@
     };
     State.goals = goals;
     State.workstreams = workstreams;
+
+    // StatusesTable optional columns: "Color" (per-status colour, unified everywhere)
+    // and "Order" (board-column order, so reordering persists to the workbook).
+    State.statusColors = {};
+    State.statusHasOrder = false;
+    State.statusHasColor = false;
+    try {
+      const statusRows = await window.WsjfData._internal._readTable("StatusesTable");
+      State.statusHasOrder = statusRows.length > 0 && Object.prototype.hasOwnProperty.call(statusRows[0], "Order");
+      State.statusHasColor = statusRows.length > 0 && Object.prototype.hasOwnProperty.call(statusRows[0], "Color");
+      const meta = statusRows.map((r) => {
+        const keys = Object.keys(r).filter((k) => k !== "_rowIndex");
+        return { name: String(r[keys[0]] == null ? "" : r[keys[0]]).trim(),
+                 order: r.Order, color: String(r.Color == null ? "" : r.Color).trim() };
+      }).filter((m) => m.name);
+      if (State.statusHasOrder) {
+        meta.sort((a, b) => {
+          const ao = (a.order === "" || a.order == null) ? 9999 : Number(a.order);
+          const bo = (b.order === "" || b.order == null) ? 9999 : Number(b.order);
+          return ao - bo;
+        });
+        State.config.Statuses = meta.map((m) => m.name);   // honour the table's Order column
+      }
+      meta.forEach((m) => { if (m.color) State.statusColors[m.name] = m.color; });
+    } catch (e) { State.statusColors = {}; }
 
     // Quarter start/end dates (if the QuartersTable carries them) drive
     // "days left" and the new-task due-date default instead of hardcoded ones.
@@ -390,9 +420,10 @@
         .filter((t) => t.Status === status)
         .sort(sortComparator);
 
+      col.style.setProperty("--sc", statusColor(status));
       col.innerHTML = `
         <header class="kcol-head">
-          <span class="kcol-title">${escapeHtml(status)}</span>
+          <span class="kcol-title"><i class="kcol-dot"></i>${escapeHtml(status)}</span>
           <span class="kcol-count">(${tasksInCol.length})</span>
         </header>
         <div class="kcol-body" data-status="${escapeHtml(status)}"></div>
@@ -730,7 +761,7 @@
     let h = '<tr data-task-id="' + t.TaskID + '">' +
       '<td class="sel-col"><input type="checkbox" class="sel-row" data-id="' + t.TaskID + '"' + (State.selected.has(Number(t.TaskID)) ? " checked" : "") + ' /></td>' +
       '<td class="list-title">' + caret + scheduleChip(t) + escapeHtml(t.Title || "") + '</td>' +
-      '<td><span class="status-chip status-' + statusSlug(t.Status) + '">' + escapeHtml(t.Status || "") + '</span></td>' +
+      '<td>' + statusChip(t.Status) + '</td>' +
       '<td>' + healthCell + '</td>' +
       '<td>' + ownerCell + '</td>' +
       '<td>' + escapeHtml(workstreamName(t.WorkstreamID)) + '</td>' +
@@ -1333,7 +1364,7 @@
       '<span class="mine-row-title">' + escapeHtml(t.Title || "") + '</span>' +
       (wsName && wsName !== "—" ? '<span class="mine-ws" title="' + escapeAttr(wsName) + '">' + escapeHtml(wsName) + '</span>' : "") +
       ownerHtml +
-      '<span class="status-chip status-' + statusSlug(t.Status) + '">' + escapeHtml(t.Status || "") + '</span>' +
+      statusChip(t.Status) +
       (dIso ? '<span class="mine-due' + (isOverdue ? " overdue" : "") + '">📅 ' + escapeHtml(formatDateShort(t.DueDate)) + '</span>' : "") +
       (subs.length ? '<span class="mine-sub">✓ ' + subDone + '/' + subs.length + '</span>' : "") +
       '<span class="mine-pct">' + pct + '%</span>';
@@ -1598,18 +1629,18 @@
       '<div class="ws-card-head">' +
         '<span class="ws-name">' + escapeHtml(w.Name || wsId) + '</span>' +
         '<span class="ws-head-right">' +
-          (w.Status ? '<span class="status-chip status-' + statusSlug(w.Status) + '">' + escapeHtml(w.Status) + '</span>' : '') +
+          (w.Status ? statusChip(w.Status) : '') +
           '<button class="ws-edit-btn" title="Edit workstream">✎</button>' +
         '</span>' +
       '</div>' +
       (w.Owner ? '<div class="ws-owner">👤 ' + escapeHtml(w.Owner) + '</div>' : '') +
       (w.UserStory ? '<p class="ws-story">' + escapeHtml(w.UserStory) + '</p>' : '') +
       '<div class="ws-statbar" title="Status mix across this workstream’s tasks">' +
-        cols.map((s) => counts[s] ? '<span class="ws-seg ws-seg-' + statusSlug(s) + '" style="flex:' + counts[s] + '" title="' + escapeAttr(s + ": " + counts[s]) + '"></span>' : '').join('') +
+        cols.map((s) => counts[s] ? '<span class="ws-seg" style="flex:' + counts[s] + ';background:' + statusColor(s) + '" title="' + escapeAttr(s + ": " + counts[s]) + '"></span>' : '').join('') +
       '</div>' +
       '<div class="ws-progress-label"><b>' + done + ' / ' + total + '</b> done · ' + pctDone + '% · avg ' + avgPct + '% complete</div>' +
       '<div class="ws-legend">' + cols.filter((s) => counts[s]).map((s) =>
-        '<span class="ws-leg"><i class="ws-seg-' + statusSlug(s) + '"></i>' + escapeHtml(s) + ' ' + counts[s] + '</span>').join('') + '</div>' +
+        '<span class="ws-leg"><i style="background:' + statusColor(s) + '"></i>' + escapeHtml(s) + ' ' + counts[s] + '</span>').join('') + '</div>' +
       '<div class="ws-chips">' +
         '<span class="ws-chip">' + total + ' tasks</span>' +
         (blocked ? '<span class="ws-chip danger">' + blocked + ' blocked</span>' : '') +
@@ -1802,7 +1833,7 @@
     // Status legend (bar colour = status).
     const usedStatuses = boardColumns().filter((s) => visible.some((t) => t.Status === s));
     const legend = usedStatuses.map((s) =>
-      '<span class="rm-leg"><i style="background:' + rmStatusColor(s) + '"></i>' + escapeHtml(s) + '</span>').join("");
+      '<span class="rm-leg"><i style="background:' + statusColor(s) + '"></i>' + escapeHtml(s) + '</span>').join("");
 
     let html = '<div class="rm-head"><h2>Roadmap</h2>' +
       '<div class="rm-head-right">' +
@@ -1874,7 +1905,7 @@
       const r = rng(t);
       const left = pctOf(r.s), width = Math.max(1.5, pctOf(r.e) - left);
       const pct = Math.max(0, Math.min(100, Number(t.PercentComplete) || 0));
-      const col = rmStatusColor(t.Status);
+      const col = statusColor(t.Status);
       const hl = t.Health ? " rm-h-" + statusSlug(t.Health) : "";
       const blocked = t.Status === "Blocked" ? " rm-blocked" : "";
       const subs = State.subtasksByParent[t.TaskID] || [];
@@ -2276,7 +2307,9 @@
     sec.appendChild(h);
     const p = document.createElement("p");
     p.className = "config-note";
-    p.textContent = "These are your Kanban columns. Rename cascades to every task. Use ▲▼ to set the column order (left→right). Delete lets you move that column's tasks to another column first.";
+    p.innerHTML = "These are your Kanban columns. Rename cascades to every task. Use ▲▼ to set the column order, and the swatch to set each colour — used everywhere (board, list, roadmap). " +
+      (State.statusHasOrder ? "Order is saved to the StatusesTable <b>Order</b> column." : "<b>Add an “Order” column to StatusesTable</b> to save column order to the workbook (it's per-device until then).") +
+      (State.statusHasColor ? "" : " <b>Add a “Color” column to StatusesTable</b> to save colours.");
     sec.appendChild(p);
 
     const listEl = document.createElement("div");
@@ -2291,18 +2324,36 @@
       up.className = "btn btn-secondary btn-sm"; up.textContent = "▲"; up.disabled = idx === 0; up.title = "Move left";
       const down = document.createElement("button");
       down.className = "btn btn-secondary btn-sm"; down.textContent = "▼"; down.disabled = idx === cols.length - 1; down.title = "Move right";
+      const swatch = document.createElement("input"); swatch.type = "color"; swatch.className = "status-swatch"; swatch.value = statusColorHex(val); swatch.title = "Status colour";
       const input = document.createElement("input"); input.type = "text"; input.value = val;
       const tag = document.createElement("span"); tag.className = "config-id"; tag.textContent = counts[val] + " task" + (counts[val] === 1 ? "" : "s");
       const saveBtn = document.createElement("button"); saveBtn.className = "btn btn-secondary btn-sm"; saveBtn.textContent = "Rename";
       const delBtn = document.createElement("button"); delBtn.className = "btn btn-archive btn-sm"; delBtn.textContent = "Delete";
 
+      swatch.addEventListener("change", () => {
+        configGuard(async () => {
+          await window.WsjfData.setStatusColor(val, swatch.value);
+          toast('Colour set for “' + val + '”.', "info");
+          await afterConfigChange();
+        });
+      });
+
+      // Reorder: persist to the StatusesTable Order column when it exists, else
+      // remember per-device.
       const reorder = (from, to) => {
         const arr = cols.slice();
         const [m] = arr.splice(from, 1);
         arr.splice(to, 0, m);
-        saveBoardColOrder(arr);
-        renderConfig();
-        renderBoardIfActive();
+        if (State.statusHasOrder) {
+          configGuard(async () => {
+            for (let i = 0; i < arr.length; i++) await window.WsjfData.setStatusOrder(arr[i], i + 1);
+            await afterConfigChange();
+          });
+        } else {
+          saveBoardColOrder(arr);
+          renderConfig();
+          renderBoardIfActive();
+        }
       };
       up.addEventListener("click", () => reorder(idx, idx - 1));
       down.addEventListener("click", () => reorder(idx, idx + 1));
@@ -2354,7 +2405,7 @@
       });
 
       row.appendChild(up); row.appendChild(down);
-      row.appendChild(input); row.appendChild(tag);
+      row.appendChild(swatch); row.appendChild(input); row.appendChild(tag);
       row.appendChild(saveBtn); row.appendChild(delBtn);
       listEl.appendChild(row);
     });
@@ -3953,9 +4004,25 @@
     return g ? (g.ShortName || g.GoalName || g.GoalID) : goalId;
   }
 
-  // Roadmap bar colour by status (white text). Custom statuses fall back to a hash.
-  const RM_STATUS_COLORS = { backlog: "#64748b", planned: "#6366f1", "in-progress": "#d97706", "on-track": "#2563eb", blocked: "#dc2626", done: "#16a34a" };
-  function rmStatusColor(status) { return RM_STATUS_COLORS[statusSlug(status)] || colorHash(status); }
+  // Unified status colour — one source for the board, list, roadmap and workstream
+  // mix. Priority: the StatusesTable "Color" column → a built-in default for common
+  // statuses → a stable hash for anything custom.
+  const STATUS_FALLBACK = { backlog: "#64748b", planned: "#6366f1", "in-progress": "#d97706", "on-track": "#2563eb", blocked: "#dc2626", done: "#16a34a" };
+  function statusColor(status) {
+    const c = State.statusColors && State.statusColors[status];
+    if (c) return c;
+    return STATUS_FALLBACK[statusSlug(status)] || colorHash(status);
+  }
+  // A guaranteed hex (for <input type="color">, which can't show hsl()).
+  function statusColorHex(status) {
+    const c = (State.statusColors && State.statusColors[status]) || STATUS_FALLBACK[statusSlug(status)];
+    return /^#[0-9a-fA-F]{6}$/.test(c || "") ? c : "#888888";
+  }
+  // Unified status chip (dot coloured by statusColor + label).
+  function statusChip(status) {
+    const s = status || "";
+    return '<span class="status-chip" style="--sc:' + statusColor(s) + '"><i class="status-dot"></i>' + escapeHtml(s) + '</span>';
+  }
   function taskGoalIds(t) {
     return String(t.GoalID || "").split(/[;,]/).map((s) => s.trim()).filter(Boolean);
   }

@@ -653,6 +653,20 @@
     await renameConfigValue("StatusesTable", oldS, newS);
     return _cascadeTaskField("Status", oldS, String(newS).trim(), false);
   }
+  // Set a status's colour (needs a "Color" column on StatusesTable).
+  async function setStatusColor(name, color) {
+    const all = await _readTable("StatusesTable");
+    const row = all.find((r) => String(_firstColValue(r)) === String(name));
+    if (!row) throw new Error('Status not found: ' + name);
+    await _updateRow("StatusesTable", row._rowIndex, "Color", color);
+  }
+  // Set a status's board-column order (needs an "Order" column on StatusesTable).
+  async function setStatusOrder(name, order) {
+    const all = await _readTable("StatusesTable");
+    const row = all.find((r) => String(_firstColValue(r)) === String(name));
+    if (!row) throw new Error('Status not found: ' + name);
+    await _updateRow("StatusesTable", row._rowIndex, "Order", order);
+  }
 
   // ----- Workstreams / Goals (tasks link by ID; renaming Name auto-propagates) -----
   // These log meaningful create/update/delete activity (not trivial UI actions).
@@ -735,7 +749,7 @@
     // config admin (write)
     addConfigValue, renameConfigValue, deleteConfigValue,
     countTasksByField, countTasksByWorkstream, countTasksByGoal,
-    renameOwner, renameQuarter, renameStatus,
+    renameOwner, renameQuarter, renameStatus, setStatusColor, setStatusOrder,
     createWorkstream, updateWorkstream, deleteWorkstream,
     createGoal, updateGoal, deleteGoal,
     // milestones (standalone roadmap lines)
