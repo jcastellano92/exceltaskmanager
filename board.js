@@ -1799,12 +1799,10 @@
     const laneIds = wsWithTasks.filter((id) => wsGroupOf(id) === sel);
     if (sel === "Other" && hasNoWs) laneIds.push("");
 
-    // Goal legend (distinct colour per goal drives the bar colours).
-    const usedGoals = [];
-    visible.forEach((t) => taskGoalIds(t).forEach((g) => { if (!usedGoals.includes(g)) usedGoals.push(g); }));
-    const legend = usedGoals.map((g) =>
-      '<span class="rm-leg"><i style="background:' + goalColor(g) + '"></i>' + escapeHtml(goalShortName(g)) + '</span>').join("") +
-      '<span class="rm-leg"><i style="background:#cbd5e1"></i>No goal</span>';
+    // Status legend (bar colour = status).
+    const usedStatuses = boardColumns().filter((s) => visible.some((t) => t.Status === s));
+    const legend = usedStatuses.map((s) =>
+      '<span class="rm-leg"><i style="background:' + rmStatusColor(s) + '"></i>' + escapeHtml(s) + '</span>').join("");
 
     let html = '<div class="rm-head"><h2>Roadmap</h2>' +
       '<div class="rm-head-right">' +
@@ -1853,40 +1851,62 @@
         '<div class="rm-row-track"><span class="rm-ms-empty">No milestones — add a dated line</span><div class="rm-today" style="left:' + todayPct + '%"></div></div></div>';
     }
 
-    // One swimlane per workstream: label on the left, its tasks stacked across the
-    // quarter timeline on the right (each a draggable/resizable bar).
+    // One swimlane per workstream: label on the left; the workstream's tasks are
+    // PACKED across the quarter timeline (non-overlapping tasks share a row) so the
+    // lane uses the available space instead of one line per task. Bars colour by status.
     let any = false;
-    const barHtml = (t) => {
+
+    // Greedy interval packing → fewest rows. tasks must be start-sorted.
+    const packRows = (tasks) => {
+      const rowsArr = [];
+      tasks.forEach((t) => {
+        const r = rng(t);
+        let placed = false;
+        for (const row of rowsArr) {
+          if (row.lastEnd < r.s) { row.items.push(t); row.lastEnd = r.e; placed = true; break; }
+        }
+        if (!placed) rowsArr.push({ items: [t], lastEnd: r.e });
+      });
+      return rowsArr.map((r) => r.items);
+    };
+
+    const barEl = (t) => {
       const r = rng(t);
       const left = pctOf(r.s), width = Math.max(1.5, pctOf(r.e) - left);
       const pct = Math.max(0, Math.min(100, Number(t.PercentComplete) || 0));
-      const gc = goalColor(taskGoalIds(t)[0] || "");
+      const col = rmStatusColor(t.Status);
       const hl = t.Health ? " rm-h-" + statusSlug(t.Health) : "";
       const blocked = t.Status === "Blocked" ? " rm-blocked" : "";
       const subs = State.subtasksByParent[t.TaskID] || [];
       const expanded = State.roadmap.expanded.has(Number(t.TaskID));
       const caret = subs.length
-        ? '<span class="rm-bar-caret" data-rm-exp="' + t.TaskID + '" title="Subtasks">' + (expanded ? "▾" : "▸") + '</span>'
+        ? '<span class="rm-bar-caret" data-rm-exp="' + t.TaskID + '" title="Show subtasks">' + (expanded ? "▾" : "▸") + '</span>'
         : '';
-      return '<div class="rm-trow" data-task-id="' + t.TaskID + '">' +
-        '<div class="rm-bar' + hl + blocked + '" style="left:' + left + '%;width:' + width + '%;background:' + gc + '" data-task-id="' + t.TaskID + '" title="' + escapeAttr(t.Title) + '">' +
-          '<span class="rm-handle rm-handle-l" data-grip="l"></span>' +
-          '<span class="rm-bar-fill" style="width:' + pct + '%"></span>' +
-          caret + scheduleChip(t) +
-          '<span class="rm-bar-label">' + escapeHtml(t.Title || "") + '</span>' +
-          '<span class="rm-handle rm-handle-r" data-grip="r"></span>' +
-        '</div></div>' +
-        (expanded ? subs.slice().sort((a, b) => (Number(a.Order) || 0) - (Number(b.Order) || 0)).map((s) => {
+      return '<div class="rm-bar' + hl + blocked + '" style="left:' + left + '%;width:' + width + '%;background:' + col + '" data-task-id="' + t.TaskID + '" title="' + escapeAttr(t.Title + " · " + (t.Status || "")) + '">' +
+        '<span class="rm-handle rm-handle-l" data-grip="l"></span>' +
+        '<span class="rm-bar-fill" style="width:' + pct + '%"></span>' +
+        caret + scheduleChip(t) +
+        '<span class="rm-bar-label">' + escapeHtml(t.Title || "") + '</span>' +
+        '<span class="rm-handle rm-handle-r" data-grip="r"></span></div>';
+    };
+
+    // Subtask rows for an expanded task — each a labelled mini-bar (parent start → due).
+    const subtaskRowsHtml = (t) => {
+      const r = rng(t);
+      const left = pctOf(r.s);
+      return (State.subtasksByParent[t.TaskID] || []).slice()
+        .sort((a, b) => (Number(a.Order) || 0) - (Number(b.Order) || 0)).map((s) => {
           const done2 = String(s.Done).toLowerCase() === "yes";
           const due = isoDate(s.DueDate);
           const sr = due ? pctOf(due) : pctOf(r.e);
-          const sw = Math.max(1.2, sr - left);
+          const sw = Math.max(8, sr - left);
           const stip = escapeAttr((s.Text || "Subtask") + (due ? " · due " + formatDateShort(due) : "") + (done2 ? " · done" : ""));
           return '<div class="rm-trow rm-subrow">' +
-            '<div class="rm-subbar' + (done2 ? " done" : "") + '" style="left:' + left + '%;width:' + sw + '%" title="' + stip + '"></div>' +
-            '<div class="rm-subdot' + (done2 ? " done" : "") + '" style="left:' + sr + '%" title="' + stip + '"></div>' +
-            '<span class="rm-sublabel-in" style="left:' + left + '%" title="' + escapeAttr(s.Text || "") + '">↳ ' + escapeHtml(s.Text || "") + '</span></div>';
-        }).join("") : "");
+            '<div class="rm-subbar2' + (done2 ? " done" : "") + '" style="left:' + left + '%;width:' + sw + '%" title="' + stip + '">' +
+              (done2 ? "✓ " : "↳ ") + escapeHtml(s.Text || "Subtask") +
+              (due ? '<span class="rm-subbar2-due">' + escapeHtml(formatDateShort(due)) + '</span>' : '') +
+            '</div></div>';
+        }).join("");
     };
 
     laneIds.forEach((wid) => {
@@ -1897,13 +1917,18 @@
       const done = tasks.filter((t) => t.Status === "Done").length;
       const w = State.workstreams.find((x) => x.WorkstreamID === wid);
       const owner = w && w.Owner ? String(w.Owner).split(/[;,]/)[0].trim() : "";
+      const packed = packRows(tasks);
+      const expandedInLane = tasks.filter((t) => State.roadmap.expanded.has(Number(t.TaskID)) && (State.subtasksByParent[t.TaskID] || []).length);
+      const rowsHtml =
+        packed.map((rowTasks) => '<div class="rm-trow">' + rowTasks.map(barEl).join("") + '</div>').join("") +
+        expandedInLane.map(subtaskRowsHtml).join("");
       html += '<div class="rm-wslane">' +
         '<div class="rm-wslabel" title="' + escapeAttr(workstreamName(wid)) + '">' +
           '<span class="rm-wsname">' + escapeHtml(workstreamName(wid) || "No workstream") + '</span>' +
           (owner ? '<span class="rm-wsowner">👤 ' + escapeHtml(owner) + '</span>' : '') +
           '<span class="rm-wsmeta">' + done + '/' + tasks.length + ' done</span>' +
         '</div>' +
-        '<div class="rm-wsrows">' + tasks.map(barHtml).join("") +
+        '<div class="rm-wsrows">' + rowsHtml +
           '<div class="rm-today" style="left:' + todayPct + '%"></div></div>' +
       '</div>';
     });
@@ -3927,6 +3952,10 @@
     const g = State.goals.find((x) => String(x.GoalID) === String(goalId));
     return g ? (g.ShortName || g.GoalName || g.GoalID) : goalId;
   }
+
+  // Roadmap bar colour by status (white text). Custom statuses fall back to a hash.
+  const RM_STATUS_COLORS = { backlog: "#64748b", planned: "#6366f1", "in-progress": "#d97706", "on-track": "#2563eb", blocked: "#dc2626", done: "#16a34a" };
+  function rmStatusColor(status) { return RM_STATUS_COLORS[statusSlug(status)] || colorHash(status); }
   function taskGoalIds(t) {
     return String(t.GoalID || "").split(/[;,]/).map((s) => s.trim()).filter(Boolean);
   }

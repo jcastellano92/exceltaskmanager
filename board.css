@@ -1129,6 +1129,10 @@ html, body {
 .rm-subbar.done { background: #9ed3b4; }
 .rm-subdot { position: absolute; top: 5px; transform: translateX(-50%); width: 10px; height: 10px; border-radius: 50%; background: #6b7686; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.12); z-index: 3; }
 .rm-subdot.done { background: #3bb273; }
+/* Subtask shown as a labelled mini-bar (so it's not just an anonymous bar) */
+.rm-subbar2 { position: absolute; top: 3px; height: 16px; border-radius: 4px; background: #d3d9e0; color: #334155; font-size: 10.5px; line-height: 16px; padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; z-index: 2; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+.rm-subbar2.done { background: #cdeedd; color: #0c6b43; }
+.rm-subbar2-due { opacity: .6; margin-left: 8px; }
 
 /* Hover card + drag date tooltip */
 .rm-hovercard { position: fixed; z-index: 1000; width: 230px; background: #fff; border: 1px solid #e4e4e7; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.16); padding: 10px 12px; font-size: 12px; }
