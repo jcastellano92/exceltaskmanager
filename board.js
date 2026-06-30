@@ -2905,6 +2905,9 @@
     // Auto % from subtasks toggle
     document.getElementById("m-autopct").addEventListener("change", () => { refreshAutoPctUI(); markDirty(); });
 
+    // Status change repaints the status-colour accent on the dropdown
+    document.getElementById("m-status").addEventListener("change", paintStatusSelect);
+
     // Owner change re-renders contributors (owner can't also be a contributor)
     document.getElementById("m-owner").addEventListener("change", () => { renderContributors(currentContributors()); updateCapacityReadout(); });
 
@@ -3108,6 +3111,7 @@
     renderTaskGoals(String(t.GoalID || "").split(/[;,]/).map((x) => x.trim()).filter(Boolean));
     fillSelect("m-quarter", State.config.Quarters, null, t.Quarter);
     fillSelect("m-status", State.config.Statuses, null, t.Status);
+    paintStatusSelect();
     document.getElementById("m-health").value = t.Health || "";
     renderHealthFlip();
     updateCapacityReadout();
@@ -4012,6 +4016,11 @@
     const c = State.statusColors && State.statusColors[status];
     if (c) return c;
     return STATUS_FALLBACK[statusSlug(status)] || colorHash(status);
+  }
+  // Paint the modal's Status dropdown with its status colour (left-edge accent).
+  function paintStatusSelect() {
+    const el = document.getElementById("m-status");
+    if (el) el.style.setProperty("--sc", statusColor(el.value));
   }
   // A guaranteed hex (for <input type="color">, which can't show hsl()).
   function statusColorHex(status) {

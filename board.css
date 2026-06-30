@@ -465,6 +465,8 @@ html, body {
 .hp.active.hp-off-track { background: #CA001B; border-color: #CA001B; color: #fff; }
 .hp.active { background: #888; border-color: #888; color: #fff; }
 .mm-select { width: auto !important; min-width: 130px; min-height: 36px; box-sizing: border-box; line-height: 1.4; border: 1px solid #dcdcdc; border-radius: 8px; padding: 6px 10px; font-size: 13px; background: #fff; }
+/* status dropdown carries its status colour as a left accent */
+#m-status { border-left: 5px solid var(--sc, #dcdcdc); padding-left: 9px; }
 .mm-right { margin-left: auto; display: inline-flex; align-items: center; gap: 14px; }
 .mm-wsjf { display: inline-flex; align-items: baseline; gap: 5px; }
 .mm-wsjf b { font-size: 22px; font-weight: 800; color: #CA001B; }
