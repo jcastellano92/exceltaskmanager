@@ -49,7 +49,7 @@
     groupBy: "",                         // List view grouping: "" | WorkstreamID | Owner | Quarter | Status | GoalID
     listSort: { key: "WSJF", dir: "desc" }, // list view column sort
     listColFilters: {},                  // per-column filters (Sheets-style): key -> Set of allowed display values
-    filters: { owner: "", workstream: "", quarter: "", status: "", goal: "", health: "", subtasks: "",
+    filters: { owner: "", workstream: "", quarter: "", status: "", goal: "", rgroup: "", health: "", subtasks: "",
                startFrom: "", startTo: "", dueFrom: "", dueTo: "", tags: new Set(), search: "" },
     selectedTags: new Set(),
     modalOpen: false,
@@ -303,6 +303,8 @@
         State.goals.map((g) => ({ value: g.GoalID, label: g.ShortName || g.GoalName || g.GoalID }))
       )
     );
+    const allGroups = Array.from(new Set(State.tasks.map(taskRoadmapGroup).filter(Boolean))).sort();
+    fillSelect("filter-rgroup", ["", ...allGroups], "All Groups", State.filters.rgroup);
   }
 
   async function reloadTasks() {
@@ -312,6 +314,8 @@
     State.lastSyncTs = Date.now();
     updateSyncLabel();
     refreshTagFilterMenu();
+    const allGroups = Array.from(new Set(State.tasks.map(taskRoadmapGroup).filter(Boolean))).sort();
+    fillSelect("filter-rgroup", ["", ...allGroups], "All Groups", State.filters.rgroup);
   }
 
   async function loadAllUpdates() {
@@ -704,6 +708,7 @@
     { key: "Owner",           label: "Owner" },
     { key: "WorkstreamID",    label: "Workstream" },
     { key: "GoalID",          label: "Goal" },
+    { key: "RoadmapGroup",    label: "Roadmap Group" },
     { key: "Quarter",         label: "Quarter" },
     { key: "WSJF",            label: "WSJF", num: true },
     { key: "DueDate",         label: "Due" },
@@ -766,6 +771,7 @@
       '<td>' + ownerCell + '</td>' +
       '<td>' + escapeHtml(workstreamName(t.WorkstreamID)) + '</td>' +
       '<td>' + goalCell + '</td>' +
+      '<td>' + (taskRoadmapGroup(t) ? '<span class="rg-pill">▦ ' + escapeHtml(taskRoadmapGroup(t)) + '</span>' : '<span class="muted">—</span>') + '</td>' +
       '<td>' + escapeHtml(t.Quarter || "") + '</td>' +
       '<td class="num"><span class="wsjf-pill ' + wsjfPillClass(wsjf) + '">' + wsjf.toFixed(1) + '</span></td>' +
       '<td>' + escapeHtml(t.DueDate ? formatDateShort(t.DueDate) : "") + '</td>' +
@@ -1006,6 +1012,7 @@
             '<option value="addcontrib">Add contributor</option>' +
             '<option value="workstream">Workstream</option>' +
             '<option value="goal">Goal</option>' +
+            '<option value="rgroup">Roadmap group</option>' +
             '<option value="quarter">Quarter</option>' +
             '<option value="pct">% complete</option>' +
             '<option value="startdate">Start date</option>' +
@@ -1053,6 +1060,12 @@
       case "addcontrib": wrap.innerHTML = sel((State.config.Owners || []).map((o) => opt(o, o)).join("")); break;
       case "workstream": wrap.innerHTML = sel((State.workstreams || []).map((w) => opt(w.WorkstreamID, w.Name || w.WorkstreamID)).join("")); break;
       case "goal": wrap.innerHTML = sel((State.goals || []).map((g) => opt(g.GoalID, g.ShortName || g.GoalName || g.GoalID)).join("")); break;
+      case "rgroup": {
+        const all = Array.from(new Set(State.tasks.map(taskRoadmapGroup).filter(Boolean))).sort();
+        wrap.innerHTML = '<input type="text" class="filter" list="bulk-rg-list" placeholder="Group name (blank = remove)" />' +
+          '<datalist id="bulk-rg-list">' + all.map((g) => '<option value="' + escapeAttr(g) + '"></option>').join("") + '</datalist>';
+        break;
+      }
       case "quarter": wrap.innerHTML = sel((State.config.Quarters || []).map((q) => opt(q, q)).join("")); break;
       case "pct": wrap.innerHTML = sel([0, 10, 20, 25, 30, 40, 50, 60, 70, 75, 80, 90, 100].map((p) => opt(String(p), p + "%")).join("")); break;
       case "startdate":
@@ -1071,6 +1084,7 @@
       addcontrib: 'add contributor "' + val + '"',
       workstream: 'set workstream to "' + workstreamName(val) + '"',
       goal: 'set goal',
+      rgroup: val ? 'set roadmap group to "' + val + '"' : "remove from roadmap group",
       quarter: 'set quarter to "' + val + '"',
       pct: 'set % complete to ' + val + '%',
       startdate: 'set start date to ' + val,
@@ -1083,7 +1097,7 @@
     if (!(await uiConfirm("Apply to " + ids.length + " task" + (ids.length === 1 ? "" : "s") + ": " + label + "?", { okText: "Apply" }))) return;
     toast("Updating " + ids.length + "…", "info");
     // Field-per-kind for the simple writeTask cases.
-    const FIELD = { owner: "Owner", health: "Health", workstream: "WorkstreamID", goal: "GoalID", quarter: "Quarter", pct: "PercentComplete", startdate: "StartDate", duedate: "DueDate" };
+    const FIELD = { owner: "Owner", health: "Health", workstream: "WorkstreamID", goal: "GoalID", rgroup: "RoadmapGroup", quarter: "Quarter", pct: "PercentComplete", startdate: "StartDate", duedate: "DueDate" };
     let ok = 0, fail = 0;
     for (const id of ids) {
       try {
@@ -1142,6 +1156,7 @@
       if (State.filters.workstream && t.WorkstreamID !== State.filters.workstream) return false;
       if (State.filters.quarter && t.Quarter !== State.filters.quarter) return false;
       if (State.filters.status && String(t.Status || "") !== State.filters.status) return false;
+      if (State.filters.rgroup && taskRoadmapGroup(t) !== State.filters.rgroup) return false;
       if (State.filters.goal) {
         const gids = String(t.GoalID || "").split(/[;,]/).map((s) => s.trim());
         if (!gids.includes(State.filters.goal)) return false;
@@ -2590,6 +2605,9 @@
     document.getElementById("filter-status").addEventListener("change", (e) => {
       State.filters.status = e.target.value; render();
     });
+    document.getElementById("filter-rgroup").addEventListener("change", (e) => {
+      State.filters.rgroup = e.target.value; render();
+    });
     [["filter-start-from", "startFrom"], ["filter-start-to", "startTo"],
      ["filter-due-from", "dueFrom"], ["filter-due-to", "dueTo"]].forEach(([id, key]) => {
       document.getElementById(id).addEventListener("change", (e) => {
@@ -2682,7 +2700,7 @@
   // ───── Active-filter chips (always-visible "what am I looking at") ─────
   function clearAllFilters() {
     const f = State.filters;
-    f.owner = ""; f.workstream = ""; f.quarter = ""; f.status = ""; f.goal = ""; f.health = ""; f.subtasks = "";
+    f.owner = ""; f.workstream = ""; f.quarter = ""; f.status = ""; f.goal = ""; f.rgroup = ""; f.health = ""; f.subtasks = "";
     f.startFrom = ""; f.startTo = ""; f.dueFrom = ""; f.dueTo = ""; f.search = "";
     State.selectedTags.clear();
     State.listColFilters = {};        // also clear the List per-column filters
@@ -2700,6 +2718,7 @@
     set("filter-quarter", f.quarter);
     set("filter-status", f.status);
     set("filter-goal", f.goal);
+    set("filter-rgroup", f.rgroup);
     set("filter-health", f.health);
     set("filter-subtasks", f.subtasks);
     set("filter-start-from", f.startFrom); set("filter-start-to", f.startTo);
@@ -2725,6 +2744,7 @@
     if (f.goal)       chips.push({ label: "Goal: " + goalShort(f.goal), clear: () => { f.goal = ""; } });
     if (f.quarter)    chips.push({ label: "Quarter: " + f.quarter, clear: () => { f.quarter = ""; } });
     if (f.status)     chips.push({ label: "Status: " + f.status, clear: () => { f.status = ""; } });
+    if (f.rgroup)     chips.push({ label: "Group: " + f.rgroup, clear: () => { f.rgroup = ""; } });
     if (f.health)     chips.push({ label: "Health: " + f.health, clear: () => { f.health = ""; } });
     if (f.startFrom)  chips.push({ label: "Start ≥ " + f.startFrom, clear: () => { f.startFrom = ""; } });
     if (f.startTo)    chips.push({ label: "Start ≤ " + f.startTo, clear: () => { f.startTo = ""; } });
@@ -2744,7 +2764,7 @@
     }
 
     // Badge on the Filters button counts panel filters (not search, not column filters).
-    const panelCount = ["owner", "workstream", "quarter", "status", "goal", "health", "subtasks", "startFrom", "startTo", "dueFrom", "dueTo"]
+    const panelCount = ["owner", "workstream", "quarter", "status", "goal", "rgroup", "health", "subtasks", "startFrom", "startTo", "dueFrom", "dueTo"]
       .reduce((n, k) => n + (f[k] ? 1 : 0), 0) + State.selectedTags.size;
     const badge = document.getElementById("filter-count");
     if (badge) { if (panelCount > 0) { badge.textContent = panelCount; badge.hidden = false; } else badge.hidden = true; }
@@ -2907,6 +2927,8 @@
 
     // Status change repaints the status-colour accent on the dropdown
     document.getElementById("m-status").addEventListener("change", paintStatusSelect);
+    // Workstream change refreshes the roadmap-group suggestions (groups are per-workstream)
+    document.getElementById("m-workstream").addEventListener("change", refreshRgroupDatalist);
 
     // Owner change re-renders contributors (owner can't also be a contributor)
     document.getElementById("m-owner").addEventListener("change", () => { renderContributors(currentContributors()); updateCapacityReadout(); });
@@ -3112,6 +3134,9 @@
     fillSelect("m-quarter", State.config.Quarters, null, t.Quarter);
     fillSelect("m-status", State.config.Statuses, null, t.Status);
     paintStatusSelect();
+    const rgEl = document.getElementById("m-rgroup");
+    if (rgEl) rgEl.value = t.RoadmapGroup || "";
+    refreshRgroupDatalist();
     document.getElementById("m-health").value = t.Health || "";
     renderHealthFlip();
     updateCapacityReadout();
@@ -3808,6 +3833,8 @@
     t.DueDate            = document.getElementById("m-due").value || "";
     t.Tags               = currentTags().join("; ");
     t.BlockedByTaskIDs   = currentBlockedIds().join(",");
+    const rgEl = document.getElementById("m-rgroup");
+    if (rgEl) t.RoadmapGroup = rgEl.value.trim();
 
     if (!t.Title) { toast("Title is required.", "warn"); return; }
 
@@ -4034,6 +4061,25 @@
   }
   function taskGoalIds(t) {
     return String(t.GoalID || "").split(/[;,]/).map((s) => s.trim()).filter(Boolean);
+  }
+
+  // ───── Roadmap groups ─────
+  // A group = tasks in the SAME workstream sharing a RoadmapGroup name. Identity is
+  // (WorkstreamID + name); the group's span is min start → max end of its members.
+  function taskRoadmapGroup(t) { return String(t.RoadmapGroup || "").trim(); }
+  function roadmapGroupNames(wid) {
+    const set = new Set();
+    State.tasks.forEach((t) => { if (t.WorkstreamID === wid) { const g = taskRoadmapGroup(t); if (g) set.add(g); } });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }
+  function tasksInGroup(wid, name) {
+    return State.tasks.filter((t) => t.WorkstreamID === wid && taskRoadmapGroup(t) === name);
+  }
+  function refreshRgroupDatalist() {
+    const list = document.getElementById("m-rgroup-list");
+    if (!list) return;
+    const wid = (document.getElementById("m-workstream") || {}).value || (currentEditingTask && currentEditingTask.WorkstreamID) || "";
+    list.innerHTML = roadmapGroupNames(wid).map((g) => '<option value="' + escapeAttr(g) + '"></option>').join("");
   }
 
   // Is a person committed beyond their effective capacity in a quarter?

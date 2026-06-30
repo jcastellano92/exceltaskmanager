@@ -273,7 +273,7 @@
       if (Object.prototype.hasOwnProperty.call(taskObj, h)) updates[h] = taskObj[h];
     });
     // Optional columns not in the canonical header list (written only if present).
-    ["StartDate", "CommitmentID", "Health", "Slips"].forEach((h) => {
+    ["StartDate", "CommitmentID", "Health", "Slips", "RoadmapGroup"].forEach((h) => {
       if (Object.prototype.hasOwnProperty.call(taskObj, h)) updates[h] = taskObj[h];
     });
     updates.LastUpdated = ts;
@@ -357,7 +357,7 @@
     });
     // Optional columns not in the canonical header list (written only if the
     // column exists; harmlessly ignored otherwise).
-    ["StartDate", "CommitmentID", "Health", "Slips"].forEach((h) => {
+    ["StartDate", "CommitmentID", "Health", "Slips", "RoadmapGroup"].forEach((h) => {
       if (Object.prototype.hasOwnProperty.call(taskObj, h)) obj[h] = taskObj[h];
     });
 

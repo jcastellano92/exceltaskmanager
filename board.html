@@ -46,6 +46,8 @@
           <select id="filter-status" class="filter"><option value="">All Statuses</option></select></div>
         <div class="fp-row"><label>Goal</label>
           <select id="filter-goal" class="filter"><option value="">All Goals</option></select></div>
+        <div class="fp-row"><label>Roadmap group</label>
+          <select id="filter-rgroup" class="filter"><option value="">All Groups</option></select></div>
         <div class="fp-row"><label>Health</label>
           <select id="filter-health" class="filter">
             <option value="">Any health</option>
@@ -94,6 +96,7 @@
             <option value="Status">Status</option>
             <option value="GoalID">Goal</option>
             <option value="Health">Health</option>
+            <option value="RoadmapGroup">Roadmap Group</option>
           </select></div>
         <div class="fp-actions">
           <button id="filter-clear" class="btn btn-secondary btn-sm" type="button">Clear all</button>
@@ -266,6 +269,9 @@
               <label class="field-label checkbox-inline" id="m-autopct-row" hidden><input type="checkbox" id="m-autopct" /> Set % from subtasks</label>
               <label class="field-label">% Complete: <span id="m-pct-readout">0</span>%</label>
               <input type="range" min="0" max="100" id="m-pct" />
+              <label class="field-label" for="m-rgroup">Roadmap group <span class="muted">(same-workstream timeline group)</span></label>
+              <input id="m-rgroup" list="m-rgroup-list" autocomplete="off" placeholder="None — type a name to group on the roadmap" />
+              <datalist id="m-rgroup-list"></datalist>
             </div>
 
             <div class="dg-card dg-meta-readonly">
