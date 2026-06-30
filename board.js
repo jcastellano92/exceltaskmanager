@@ -43,7 +43,7 @@
     expandedSubtasks: new Set(),         // taskIds whose subtask checklist is expanded inline (board + list)
     milestones: [],                      // standalone roadmap milestone lines (MilestonesTable)
     allUpdates: [],                      // every Updates row (for the My Tasks "recent updates" feed)
-    roadmap: { showDates: true, expanded: new Set(), group: "" }, // roadmap prefs: drag date tooltip + expanded subtask lanes + selected group tab
+    roadmap: { showDates: true, expanded: new Set(), group: "", selected: new Set(), focus: null }, // roadmap prefs + Ctrl-selected taskIds + open group focus {wid,name}
     selected: new Set(),                 // taskIds selected in List view for bulk actions
     sort: "wsjf",                        // board column sort: "wsjf" | "due" | "manual"
     groupBy: "",                         // List view grouping: "" | WorkstreamID | Owner | Quarter | Status | GoalID
@@ -1902,16 +1902,15 @@
     // lane uses the available space instead of one line per task. Bars colour by status.
     let any = false;
 
-    // Greedy interval packing → fewest rows. tasks must be start-sorted.
-    const packRows = (tasks) => {
+    // Greedy interval packing → fewest rows. Items must be start-sorted and have s/e.
+    const packItems = (items) => {
       const rowsArr = [];
-      tasks.forEach((t) => {
-        const r = rng(t);
+      items.forEach((it) => {
         let placed = false;
         for (const row of rowsArr) {
-          if (row.lastEnd < r.s) { row.items.push(t); row.lastEnd = r.e; placed = true; break; }
+          if (row.lastEnd < it.s) { row.items.push(it); row.lastEnd = it.e; placed = true; break; }
         }
-        if (!placed) rowsArr.push({ items: [t], lastEnd: r.e });
+        if (!placed) rowsArr.push({ items: [it], lastEnd: it.e });
       });
       return rowsArr.map((r) => r.items);
     };
@@ -1923,17 +1922,27 @@
       const col = statusColor(t.Status);
       const hl = t.Health ? " rm-h-" + statusSlug(t.Health) : "";
       const blocked = t.Status === "Blocked" ? " rm-blocked" : "";
+      const seld = State.roadmap.selected.has(Number(t.TaskID)) ? " rm-bar-sel" : "";
       const subs = State.subtasksByParent[t.TaskID] || [];
       const expanded = State.roadmap.expanded.has(Number(t.TaskID));
       const caret = subs.length
         ? '<span class="rm-bar-caret" data-rm-exp="' + t.TaskID + '" title="Show subtasks">' + (expanded ? "▾" : "▸") + '</span>'
         : '';
-      return '<div class="rm-bar' + hl + blocked + '" style="left:' + left + '%;width:' + width + '%;background:' + col + '" data-task-id="' + t.TaskID + '" title="' + escapeAttr(t.Title + " · " + (t.Status || "")) + '">' +
+      return '<div class="rm-bar' + hl + blocked + seld + '" style="left:' + left + '%;width:' + width + '%;background:' + col + '" data-task-id="' + t.TaskID + '" title="' + escapeAttr(t.Title + " · " + (t.Status || "") + " · Ctrl+click to multi-select") + '">' +
         '<span class="rm-handle rm-handle-l" data-grip="l"></span>' +
         '<span class="rm-bar-fill" style="width:' + pct + '%"></span>' +
         caret + scheduleChip(t) +
         '<span class="rm-bar-label">' + escapeHtml(t.Title || "") + '</span>' +
         '<span class="rm-handle rm-handle-r" data-grip="r"></span></div>';
+    };
+
+    // A roadmap group is collapsed into one bar (min start → max end); click to focus.
+    const groupBarEl = (g) => {
+      const left = pctOf(g.s), width = Math.max(2.5, pctOf(g.e) - left);
+      return '<div class="rm-bar rm-groupbar" style="left:' + left + '%;width:' + width + '%" data-rg-group="' + escapeAttr(g.name) + '" data-rg-wid="' + escapeAttr(g.wid) + '" title="' + escapeAttr("Group: " + g.name + " (" + g.tasks.length + " items) — click to open & edit") + '">' +
+        '<span class="rm-groupbar-icon">▦</span>' +
+        '<span class="rm-bar-label">' + escapeHtml(g.name) + ' (' + g.tasks.length + ')</span>' +
+        '<span class="rm-groupbar-open">⤢</span></div>';
     };
 
     // Subtask rows for an expanded task — each a labelled mini-bar (parent start → due).
@@ -1963,10 +1972,25 @@
       const done = tasks.filter((t) => t.Status === "Done").length;
       const w = State.workstreams.find((x) => x.WorkstreamID === wid);
       const owner = w && w.Owner ? String(w.Owner).split(/[;,]/)[0].trim() : "";
-      const packed = packRows(tasks);
-      const expandedInLane = tasks.filter((t) => State.roadmap.expanded.has(Number(t.TaskID)) && (State.subtasksByParent[t.TaskID] || []).length);
+
+      // Split into roadmap groups (collapsed to one bar each) + ungrouped tasks.
+      const groupedMap = {};
+      const ungrouped = [];
+      tasks.forEach((t) => { const g = taskRoadmapGroup(t); if (g) (groupedMap[g] = groupedMap[g] || []).push(t); else ungrouped.push(t); });
+      const items = [];
+      ungrouped.forEach((t) => { const r = rng(t); items.push({ kind: "task", t: t, s: r.s, e: r.e }); });
+      Object.keys(groupedMap).forEach((name) => {
+        const gts = groupedMap[name];
+        let s = null, e = null;
+        gts.forEach((t) => { const r = rng(t); if (s === null || r.s < s) s = r.s; if (e === null || r.e > e) e = r.e; });
+        items.push({ kind: "group", name: name, wid: wid, tasks: gts, s: s, e: e });
+      });
+      items.sort((a, b) => (a.s < b.s ? -1 : a.s > b.s ? 1 : 0));
+      const packed = packItems(items);
+
+      const expandedInLane = ungrouped.filter((t) => State.roadmap.expanded.has(Number(t.TaskID)) && (State.subtasksByParent[t.TaskID] || []).length);
       const rowsHtml =
-        packed.map((rowTasks) => '<div class="rm-trow">' + rowTasks.map(barEl).join("") + '</div>').join("") +
+        packed.map((rowItems) => '<div class="rm-trow">' + rowItems.map((it) => it.kind === "group" ? groupBarEl(it) : barEl(it.t)).join("") + '</div>').join("") +
         expandedInLane.map(subtaskRowsHtml).join("");
       html += '<div class="rm-wslane">' +
         '<div class="rm-wslabel" title="' + escapeAttr(workstreamName(wid)) + '">' +
@@ -1982,6 +2006,13 @@
     if (!any) html += '<div class="mine-empty">No tasks in “' + escapeHtml(sel) + '”. Milestones still show above.</div>';
     html += '<div class="rm-hovercard" id="rm-hovercard" hidden></div>';
     html += '<div class="rm-dragtip" id="rm-dragtip" hidden></div>';
+    // Floating action bar when bars are Ctrl-selected.
+    const selCount = State.roadmap.selected.size;
+    if (selCount) {
+      html += '<div class="rm-selbar" id="rm-selbar"><span class="rm-selbar-n">' + selCount + ' selected</span>' +
+        '<button class="btn btn-primary btn-sm" id="rm-sel-group">▦ Group…</button>' +
+        '<button class="btn btn-secondary btn-sm" id="rm-sel-clear">Clear</button></div>';
+    }
     root.innerHTML = html;
 
     // Group tabs.
@@ -2012,13 +2043,45 @@
         renderRoadmap();
       });
     });
-    // Bars: hover card + drag/resize (+ click opens the task).
+    // Bars: hover card + drag/resize (+ click opens the task; Ctrl+click selects).
     Array.from(root.querySelectorAll(".rm-bar[data-task-id]")).forEach((bar) => {
       const task = State.tasks.find((x) => Number(x.TaskID) === Number(bar.dataset.taskId));
       if (!task) return;
       wireRoadmapHover(bar, task);
       wireRoadmapDrag(bar, task, { pctOf: pctOf, isoFromPct: isoFromPct });
     });
+    // Group bars → open focus mode.
+    Array.from(root.querySelectorAll(".rm-groupbar[data-rg-group]")).forEach((gb) => {
+      gb.addEventListener("click", () => openGroupFocus(gb.dataset.rgWid, gb.dataset.rgGroup));
+    });
+    // Selection action bar.
+    const selGroupBtn = document.getElementById("rm-sel-group");
+    if (selGroupBtn) selGroupBtn.addEventListener("click", groupSelectedTasks);
+    const selClearBtn = document.getElementById("rm-sel-clear");
+    if (selClearBtn) selClearBtn.addEventListener("click", () => { State.roadmap.selected.clear(); renderRoadmap(); });
+  }
+
+  // Group the Ctrl-selected roadmap tasks. Enforces a single workstream.
+  async function groupSelectedTasks() {
+    const ids = Array.from(State.roadmap.selected);
+    if (ids.length < 1) return;
+    const tasks = ids.map((id) => State.tasks.find((t) => Number(t.TaskID) === Number(id))).filter(Boolean);
+    const wids = Array.from(new Set(tasks.map((t) => t.WorkstreamID)));
+    if (wids.length > 1) {
+      toast("Roadmap groups can't span workstreams — select tasks in the same workstream.", "error");
+      return;
+    }
+    const wid = wids[0];
+    const name = await uiPrompt("Name this roadmap group", "Group title", "");
+    if (!name) return;
+    toast("Grouping " + tasks.length + "…", "info");
+    try {
+      for (const t of tasks) await window.WsjfData.writeTask({ TaskID: t.TaskID, RoadmapGroup: name }, { force: true, silent: true });
+      State.roadmap.selected.clear();
+      await reloadTasks();
+      renderRoadmap();
+      toast('Grouped ' + tasks.length + ' into “' + name + '”.', "info");
+    } catch (e) { toast("Group failed: " + e.message, "error"); }
   }
 
   // Hover card with the full task detail (the bar label truncates).
@@ -2054,6 +2117,15 @@
     bar.addEventListener("pointerdown", (ev) => {
       if (ev.button !== 0) return;
       if (ev.target.closest(".rm-bar-caret")) return;   // caret toggles subtasks, never drags
+      // Ctrl/Cmd+click = multi-select for grouping (no drag, no open).
+      if (ev.ctrlKey || ev.metaKey) {
+        ev.preventDefault();
+        const id = Number(task.TaskID);
+        if (State.roadmap.selected.has(id)) State.roadmap.selected.delete(id);
+        else State.roadmap.selected.add(id);
+        (State.roadmap.focus ? renderGroupFocus : renderRoadmap)();
+        return;
+      }
       ev.preventDefault();
       const grip = ev.target.closest(".rm-handle");
       const mode = grip ? (grip.dataset.grip === "l" ? "resize-l" : "resize-r") : "move";
@@ -2064,8 +2136,10 @@
       const width0 = parseFloat(bar.style.width) || 1;
       let moved = false;
       State._rmDragging = false;
-      const tip = document.getElementById("rm-dragtip");
-      const card = document.getElementById("rm-hovercard"); if (card) card.hidden = true;
+      // Scope the tooltip/hovercard to the bar's surface (main roadmap vs focus overlay).
+      const rootEl = bar.closest(".rm-focus-overlay") || document.getElementById("roadmapview") || document;
+      const tip = rootEl.querySelector(".rm-dragtip");
+      const card = rootEl.querySelector(".rm-hovercard"); if (card) card.hidden = true;
       bar.classList.add("rm-bar-dragging");
 
       function onMove(e) {
@@ -2123,7 +2197,7 @@
           { value: "move", label: "Just move it — no schedule flag", cls: "btn-secondary" }
         ]
       );
-      if (choice === null) { renderRoadmap(); return; }     // cancelled → snap back
+      if (choice === null) { rmReRender(); return; }     // cancelled → snap back
       if (choice === "delay") { slipsDelta = 1; action = "Delayed"; }
       else if (choice === "accel") { slipsDelta = -1; action = "Accelerated"; }
     }
@@ -2155,7 +2229,188 @@
       toast("Save failed: " + e.message + " — reverting.", "error");
       await reloadTasks();
     }
+    rmReRender();
+  }
+
+  // Re-render whichever roadmap surface is active (focus overlay or main roadmap).
+  function rmReRender() { if (State.roadmap.focus) renderGroupFocus(); else renderRoadmap(); }
+
+  // ───── Roadmap group focus mode ─────
+  function openGroupFocus(wid, name) {
+    State.roadmap.selected.clear();
+    State.roadmap.focus = { wid: wid, name: name };
+    renderGroupFocus();
+  }
+  function closeGroupFocus() {
+    State.roadmap.focus = null;
+    const host = document.getElementById("rm-focus");
+    if (host) host.remove();
     renderRoadmap();
+  }
+  function renderGroupFocus() {
+    const f = State.roadmap.focus;
+    if (!f) return;
+    const members = tasksInGroup(f.wid, f.name);
+    let host = document.getElementById("rm-focus");
+    if (!host) { host = document.createElement("div"); host.id = "rm-focus"; host.className = "rm-focus-overlay"; document.body.appendChild(host); }
+    if (!members.length) { closeGroupFocus(); return; }   // group emptied → exit
+
+    const yr = new Date().getFullYear();
+    const yearStart = isoDate((State.quarterDates.Q1 || {}).start) || (yr + "-01-01");
+    const yearEnd = isoDate((State.quarterDates.Q4 || {}).end) || (yr + "-12-31");
+    const t0 = new Date(yearStart + "T00:00:00").getTime();
+    const span = Math.max(1, new Date(yearEnd + "T00:00:00").getTime() - t0);
+    const pctOf = (iso) => { const tt = new Date(iso + "T00:00:00").getTime(); return isNaN(tt) ? 0 : Math.max(0, Math.min(100, ((tt - t0) / span) * 100)); };
+    const isoFromPct = (p) => new Date(t0 + (Math.max(0, Math.min(100, p)) / 100) * span).toISOString().slice(0, 10);
+    const todayPct = pctOf(new Date().toISOString().slice(0, 10));
+    const rng = (task) => {
+      let s = isoDate(task.StartDate), e = isoDate(task.DueDate);
+      const q = State.quarterDates[task.Quarter];
+      if (!s) s = q ? isoDate(q.start) : (e || yearStart);
+      if (!e) e = q ? isoDate(q.end) : (s || yearEnd);
+      if (e < s) e = s;
+      return { s: s, e: e };
+    };
+    const usedStatuses = boardColumns().filter((s) => members.some((t) => t.Status === s));
+    const legend = usedStatuses.map((s) => '<span class="rm-leg"><i style="background:' + statusColor(s) + '"></i>' + escapeHtml(s) + '</span>').join("");
+
+    const rowsHtml = members.slice().sort((a, b) => { const ra = rng(a).s, rb = rng(b).s; return ra < rb ? -1 : ra > rb ? 1 : 0; }).map((t) => {
+      const r = rng(t), left = pctOf(r.s), width = Math.max(1.5, pctOf(r.e) - left);
+      const pct = Math.max(0, Math.min(100, Number(t.PercentComplete) || 0));
+      const hl = t.Health ? " rm-h-" + statusSlug(t.Health) : "";
+      const blocked = t.Status === "Blocked" ? " rm-blocked" : "";
+      const bar = '<div class="rm-bar' + hl + blocked + '" style="left:' + left + '%;width:' + width + '%;background:' + statusColor(t.Status) + '" data-task-id="' + t.TaskID + '" title="' + escapeAttr(t.Title + " · " + (t.Status || "")) + '">' +
+        '<span class="rm-handle rm-handle-l" data-grip="l"></span>' +
+        '<span class="rm-bar-fill" style="width:' + pct + '%"></span>' + scheduleChip(t) +
+        '<span class="rm-bar-label">' + escapeHtml(t.Title || "") + '</span>' +
+        '<span class="rm-handle rm-handle-r" data-grip="r"></span></div>';
+      return '<div class="rm-row" data-task-id="' + t.TaskID + '"><div class="rm-row-label" title="' + escapeAttr(t.Title) + '">' + escapeHtml(t.Title || "") + '</div>' +
+        '<div class="rm-row-track">' + bar + '<div class="rm-today" style="left:' + todayPct + '%"></div></div></div>';
+    }).join("");
+
+    host.innerHTML =
+      '<div class="rm-focus">' +
+        '<header class="rm-focus-head">' +
+          '<button class="btn btn-secondary btn-sm" id="rf-back">← Back to roadmap</button>' +
+          '<input id="rf-title" class="rm-focus-title" value="' + escapeAttr(f.name) + '" title="Rename group" />' +
+          '<span class="rm-focus-meta">' + escapeHtml(workstreamName(f.wid)) + ' · ' + members.length + ' item' + (members.length === 1 ? "" : "s") + '</span>' +
+          '<span style="flex:1"></span>' +
+          '<button class="btn btn-secondary btn-sm" id="rf-add">+ Add task</button>' +
+          '<div class="rf-ai-wrap"><button class="btn btn-secondary btn-sm" id="rf-ai">✨ AI</button>' +
+            '<div class="rf-ai-menu" id="rf-ai-menu" hidden><div class="rf-ai-head">AI prompts</div>' +
+              '<button class="rf-ai-item" data-ai="name">Help Name Group Based On Tasks</button></div></div>' +
+          '<button class="btn btn-archive btn-sm" id="rf-ungroup">Ungroup</button>' +
+        '</header>' +
+        '<div class="rm-legend">' + legend + '<span class="rm-leg-hint">Drag bars to change dates · drag edges to resize · click a bar to open</span></div>' +
+        '<div class="rm-scroll"><div class="rm">' +
+          '<div class="rm-row rm-axis-row"><div class="rm-row-label">Task</div><div class="rm-row-track rm-axis-track">' +
+            ["Q1", "Q2", "Q3", "Q4"].map((q) => '<span class="rm-qcol">' + q + '</span>').join("") +
+            '<div class="rm-today" style="left:' + todayPct + '%"></div></div></div>' +
+          rowsHtml +
+        '</div></div>' +
+        '<div class="rm-dragtip" hidden></div>' +
+      '</div>';
+
+    host.querySelector("#rf-back").addEventListener("click", closeGroupFocus);
+    const titleEl = host.querySelector("#rf-title");
+    titleEl.addEventListener("change", () => renameFocusGroup(titleEl.value.trim()));
+    host.querySelector("#rf-add").addEventListener("click", openAddToGroupPicker);
+    host.querySelector("#rf-ungroup").addEventListener("click", ungroupFocus);
+    const aiBtn = host.querySelector("#rf-ai"), aiMenu = host.querySelector("#rf-ai-menu");
+    aiBtn.addEventListener("click", (e) => { e.stopPropagation(); aiMenu.hidden = !aiMenu.hidden; });
+    document.addEventListener("mousedown", function closer(e) { if (aiMenu && !aiMenu.parentElement.contains(e.target)) { aiMenu.hidden = true; } });
+    host.querySelector('.rf-ai-item[data-ai="name"]').addEventListener("click", () => { aiMenu.hidden = true; copyGroupAiPrompt(); });
+
+    Array.from(host.querySelectorAll(".rm-bar[data-task-id]")).forEach((bar) => {
+      const task = State.tasks.find((x) => Number(x.TaskID) === Number(bar.dataset.taskId));
+      if (task) wireRoadmapDrag(bar, task, { pctOf: pctOf, isoFromPct: isoFromPct });
+    });
+  }
+
+  async function renameFocusGroup(newName) {
+    const f = State.roadmap.focus;
+    if (!f || !newName || newName === f.name) return;
+    try {
+      for (const t of tasksInGroup(f.wid, f.name)) await window.WsjfData.writeTask({ TaskID: t.TaskID, RoadmapGroup: newName }, { force: true, silent: true });
+      f.name = newName;
+      await reloadTasks();
+      renderGroupFocus();
+      toast("Group renamed.", "info");
+    } catch (e) { toast("Rename failed: " + e.message, "error"); }
+  }
+
+  async function ungroupFocus() {
+    const f = State.roadmap.focus;
+    if (!f) return;
+    if (!(await uiConfirm('Ungroup “' + f.name + '”? Its tasks stay, just no longer grouped on the roadmap.', { okText: "Ungroup" }))) return;
+    try {
+      for (const t of tasksInGroup(f.wid, f.name)) await window.WsjfData.writeTask({ TaskID: t.TaskID, RoadmapGroup: "" }, { force: true, silent: true });
+      await reloadTasks();
+      closeGroupFocus();
+      toast("Ungrouped.", "info");
+    } catch (e) { toast("Ungroup failed: " + e.message, "error"); }
+  }
+
+  // Add same-workstream tasks into the focused group (each row adds on click).
+  function openAddToGroupPicker() {
+    const f = State.roadmap.focus;
+    if (!f) return;
+    const host = document.createElement("div");
+    host.className = "confirm-overlay";
+    const box = document.createElement("div");
+    box.className = "confirm-box ms-editor";
+    function rowsHtml() {
+      const cands = State.tasks.filter((t) => t.WorkstreamID === f.wid && taskRoadmapGroup(t) !== f.name);
+      if (!cands.length) return '<p class="muted" style="font-size:13px;">No other tasks in this workstream to add.</p>';
+      return cands.map((t) => '<div class="rf-add-row"><span class="rf-add-title">' + escapeHtml(t.Title || "") +
+        (taskRoadmapGroup(t) ? ' <span class="muted">(in “' + escapeHtml(taskRoadmapGroup(t)) + '”)</span>' : '') + '</span>' +
+        '<button class="btn btn-secondary btn-sm" data-add="' + t.TaskID + '">Add</button></div>').join("");
+    }
+    box.innerHTML = '<h3 class="confirm-title">Add tasks to “' + escapeHtml(f.name) + '”</h3>' +
+      '<div class="rf-add-list" id="rf-add-list">' + rowsHtml() + '</div>' +
+      '<div class="confirm-actions"><span style="flex:1"></span><button class="btn btn-primary" id="rf-add-done">Done</button></div>';
+    host.appendChild(box);
+    document.body.appendChild(host);
+    function close() { host.remove(); }
+    host.addEventListener("click", (e) => { if (e.target === host) close(); });
+    box.querySelector("#rf-add-done").addEventListener("click", close);
+    box.addEventListener("click", async (e) => {
+      const btn = e.target.closest("[data-add]");
+      if (!btn) return;
+      btn.disabled = true;
+      try {
+        await window.WsjfData.writeTask({ TaskID: Number(btn.dataset.add), RoadmapGroup: f.name }, { force: true, silent: true });
+        await reloadTasks();
+        renderGroupFocus();
+        box.querySelector("#rf-add-list").innerHTML = rowsHtml();
+        toast("Added to group.", "info");
+      } catch (err) { toast("Add failed: " + err.message, "error"); btn.disabled = false; }
+    });
+  }
+
+  // Copy an AI prompt + the group's data to the clipboard (for Copilot, etc.).
+  function copyGroupAiPrompt() {
+    const f = State.roadmap.focus;
+    if (!f) return;
+    const members = tasksInGroup(f.wid, f.name);
+    const lines = members.map((t) => '- ' + (t.Title || "") + ' | status: ' + (t.Status || "") +
+      ' | ' + (isoDate(t.StartDate) || "?") + " → " + (isoDate(t.DueDate) || "?") +
+      ' | ' + Math.round(Number(t.PercentComplete) || 0) + '% | owner: ' + (t.Owner || ""));
+    const text = 'Suggest a concise, descriptive name (3–6 words) for this group of related roadmap items in the "' +
+      workstreamName(f.wid) + '" workstream. Reply with just the suggested name.\n\nCurrent working name: ' + f.name +
+      '\nItems:\n' + lines.join("\n");
+    const ok = () => toast("Your clipboard has copied a prompt and data to use with Copilot.", "info");
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(ok, () => fallbackCopy(text, ok));
+    else fallbackCopy(text, ok);
+  }
+  function fallbackCopy(text, cb) {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      document.execCommand("copy"); ta.remove();
+      if (cb) cb();
+    } catch (e) { toast("Couldn't copy — please copy manually.", "error"); }
   }
 
   async function reloadMilestones() {
@@ -4400,6 +4655,31 @@
   // ───── Confirm dialog ─────
   // Native confirm()/alert() are blocked inside Office dialogs (sandboxed iframe),
   // so use a custom DOM-based confirm that works everywhere. Returns a Promise<boolean>.
+  // Single-line text prompt. Resolves the trimmed string, or null on cancel.
+  function uiPrompt(title, label, def) {
+    return new Promise((resolve) => {
+      const host = document.createElement("div");
+      host.className = "confirm-overlay";
+      const box = document.createElement("div");
+      box.className = "confirm-box";
+      box.innerHTML = '<h3 class="confirm-title">' + escapeHtml(title) + '</h3>' +
+        (label ? '<label class="ms-fl">' + escapeHtml(label) + '<input id="up-in" type="text" /></label>' : '<input id="up-in" type="text" style="width:100%" />') +
+        '<div class="confirm-actions"><span style="flex:1"></span>' +
+        '<button class="btn btn-secondary" id="up-cancel">Cancel</button>' +
+        '<button class="btn btn-primary" id="up-ok">OK</button></div>';
+      host.appendChild(box);
+      document.body.appendChild(host);
+      const input = box.querySelector("#up-in");
+      input.value = def || "";
+      function done(v) { host.remove(); resolve(v); }
+      box.querySelector("#up-cancel").addEventListener("click", () => done(null));
+      box.querySelector("#up-ok").addEventListener("click", () => done(input.value.trim()));
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter") done(input.value.trim()); });
+      host.addEventListener("click", (e) => { if (e.target === host) done(null); });
+      setTimeout(() => input.focus(), 0);
+    });
+  }
+
   // Multi-choice dialog. choices = [{ value, label, cls }]. Resolves chosen value
   // (or null on cancel). Used by the roadmap cross-quarter drop prompt.
   function uiChoose(title, message, choices) {

@@ -1147,6 +1147,32 @@ html, body {
 .health-on-track-txt { color: #137a3e; } .health-at-risk-txt { color: #855900; } .health-off-track-txt { color: #b00020; }
 .rm-dragtip { position: fixed; z-index: 1001; background: #1f2937; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 6px; pointer-events: none; white-space: nowrap; }
 
+/* Roadmap groups: collapsed group bar, multi-select, action bar, focus mode */
+.rm-groupbar { background: #eef2ff !important; color: #3730a3; box-shadow: inset 0 0 0 2px #6366f1; cursor: pointer; gap: 4px; }
+.rm-groupbar .rm-bar-label { color: #3730a3; text-shadow: none; font-weight: 800; }
+.rm-groupbar-icon { color: #6366f1; font-size: 11px; padding-left: 5px; }
+.rm-groupbar-open { margin-left: auto; padding-right: 6px; color: #6366f1; font-size: 11px; }
+.rm-bar-sel { box-shadow: 0 0 0 2px #fff, 0 0 0 4px #2563eb; }
+.rm-selbar { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 1002; display: inline-flex; align-items: center; gap: 10px; background: #1f2937; color: #fff; padding: 8px 14px; border-radius: 999px; box-shadow: 0 8px 24px rgba(0,0,0,.3); }
+.rm-selbar-n { font-size: 13px; font-weight: 700; }
+
+.rm-focus-overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(20,22,28,.5); display: flex; padding: 24px; }
+.rm-focus { background: #fff; border-radius: 14px; width: 100%; max-width: 1320px; margin: auto; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.3); }
+.rm-focus-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid #eee; flex-wrap: wrap; }
+.rm-focus-title { font-size: 18px; font-weight: 800; border: 1px solid transparent; border-radius: 8px; padding: 4px 8px; min-width: 180px; }
+.rm-focus-title:hover { border-color: #e0e0e0; } .rm-focus-title:focus { outline: none; border-color: #6366f1; background: #fafaff; }
+.rm-focus-meta { font-size: 12px; color: #888; font-weight: 600; }
+.rm-focus-head .rm-legend, .rm-focus .rm-legend { margin: 8px 18px; }
+.rm-focus .rm-scroll { padding: 0 18px 18px; overflow: auto; }
+.rf-ai-wrap { position: relative; }
+.rf-ai-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 5; background: #fff; border: 1px solid #e4e4e7; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.16); min-width: 240px; padding: 6px; }
+.rf-ai-head { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #999; font-weight: 800; padding: 4px 8px; }
+.rf-ai-item { display: block; width: 100%; text-align: left; border: none; background: none; cursor: pointer; padding: 8px 8px; border-radius: 6px; font-size: 13px; color: #333; }
+.rf-ai-item:hover { background: #eef2ff; color: #3730a3; }
+.rf-add-list { max-height: 50vh; overflow: auto; margin: 6px 0 10px; }
+.rf-add-row { display: flex; align-items: center; gap: 10px; padding: 6px 2px; border-bottom: 1px solid #f1f1f3; }
+.rf-add-title { flex: 1; font-size: 13px; min-width: 0; }
+
 /* Milestone editor + multi-choice dialog */
 .confirm-title { margin: 0 0 10px; font-size: 16px; }
 .confirm-actions-col { flex-direction: column; align-items: stretch; gap: 8px; }

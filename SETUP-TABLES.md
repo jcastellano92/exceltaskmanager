@@ -47,6 +47,7 @@ sheet formulas there; the app reads them but never overwrites them.
 | `AttachmentCount` | **formula** (count from AttachmentsTable) |
 | `Health` | 🆕 `On Track` / `At Risk` / `Off Track` (blank = none) |
 | `Slips` | 🆕 signed integer — net quarter moves. `+1` per Delay, `−1` per Accelerate. Drives the «/» chip |
+| `RoadmapGroup` | 🆕 text — name of the roadmap group this task belongs to (groups are per-workstream). Optional; powers roadmap grouping, the List column/filter, and bulk |
 | `CommitmentID` | optional (written through if the column exists) |
 
 ## SubtasksTable
