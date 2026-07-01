@@ -1019,8 +1019,9 @@ html, body {
 
 /* Config: per-status colour swatch */
 .status-swatch { width: 34px; height: 30px; padding: 2px; border: 1px solid #d4d4d8; border-radius: 8px; background: #fff; cursor: pointer; flex: 0 0 auto; }
-.status-bucket { flex: 0 0 auto; height: 30px; border: 1px solid #d4d4d8; border-radius: 8px; padding: 0 6px; font-size: 12px; background: #fff; }
-.status-prio { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: #555; white-space: nowrap; }
+.status-flags { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 12px; font-size: 12px; color: #555; }
+.status-flags label { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; cursor: pointer; }
+.config-warn { background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 8px 12px; color: #9a3412; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 /* Workstream groups (collapsible) */
 .ws-grid-head-right { display: inline-flex; align-items: center; gap: 12px; }

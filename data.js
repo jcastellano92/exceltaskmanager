@@ -677,13 +677,33 @@
     if (!row) throw new Error('Status not found: ' + name);
     await _updateRow("StatusesTable", row._rowIndex, "Order", order);
   }
-  // Update arbitrary StatusesTable columns for a status (e.g. Bucket, Priority).
+  // Update arbitrary StatusesTable columns for a status (e.g. Complete, Blocked).
   // Only columns that exist are written (missing ones are skipped).
   async function updateStatusRow(name, fields) {
     const all = await _readTable("StatusesTable");
     const row = all.find((r) => String(_firstColValue(r)) === String(name));
     if (!row) throw new Error('Status not found: ' + name);
     await _updateRowMulti("StatusesTable", row._rowIndex, fields);
+  }
+  // Add any missing columns to a table (so status config can be persisted + shared).
+  // Returns the number of columns added.
+  async function addTableColumns(tableName, colNames) {
+    return Excel.run(async (ctx) => {
+      const tbl = ctx.workbook.tables.getItem(tableName);
+      const header = tbl.getHeaderRowRange();
+      header.load("values");
+      await ctx.sync();
+      const existing = (header.values[0] || []).map((h) => String(h));
+      let added = 0;
+      (colNames || []).forEach((name) => {
+        if (existing.includes(String(name))) return;
+        tbl.columns.add(null, null, String(name));   // append at the end, named
+        existing.push(String(name));
+        added++;
+      });
+      await ctx.sync();
+      return added;
+    });
   }
 
   // ----- Workstreams / Goals (tasks link by ID; renaming Name auto-propagates) -----
@@ -767,7 +787,7 @@
     // config admin (write)
     addConfigValue, renameConfigValue, deleteConfigValue,
     countTasksByField, countTasksByWorkstream, countTasksByGoal,
-    renameOwner, renameQuarter, renameStatus, setStatusColor, setStatusOrder, updateStatusRow, setCompleteStatuses,
+    renameOwner, renameQuarter, renameStatus, setStatusColor, setStatusOrder, updateStatusRow, addTableColumns, setCompleteStatuses,
     createWorkstream, updateWorkstream, deleteWorkstream,
     createGoal, updateGoal, deleteGoal,
     // milestones (standalone roadmap lines)

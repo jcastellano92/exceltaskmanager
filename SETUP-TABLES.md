@@ -141,5 +141,8 @@ The first column holds the status names (these are your Kanban columns). Two **o
 | `Status` (first col) | the status name, e.g. `Backlog`, `Planned/Ready`, `In Progress`, `Blocked`, `Done` |
 | `Order` 🆕 | number — left→right board-column order. With this column, reordering in the app saves here (otherwise order is per-device only) |
 | `Color` 🆕 | hex colour (e.g. `#6366f1`) — the **one** colour used for that status everywhere (board, list, roadmap bars, workstream mix) |
-| `Bucket` 🆕 | `ready` / `active` / `blocked` / `done` — categorises the status so the app **adapts to renamed statuses**. Drives the My-Tasks stat tiles + the "complete"/"blocked" behaviour (auto-100%, at-risk, etc.). If blank, inferred from the name |
-| `Priority` 🆕 | `Yes`/`No` — does this status feed the **My Priorities** list (default: the `active` bucket) |
+| `Complete` 🆕 | `Yes`/`No` — this status means **done** (auto-100%, closes subtasks, counts as "Recently completed"). Lets the app adapt if you rename "Done". If blank, inferred from the name |
+| `Blocked` 🆕 | `Yes`/`No` — this status means **blocked** (at-risk highlighting). If blank, inferred from the name |
+| `ShowStat` 🆕 | `Yes`/`No` — show this status as a **stat tile** at the top of My Tasks (default: all statuses) |
+
+> **Tip:** You don't have to add these columns by hand — open **Config → Board columns** and click **“➕ Add these columns to StatusesTable”**. All the toggles then save to the workbook so your whole team shares the same setup.
