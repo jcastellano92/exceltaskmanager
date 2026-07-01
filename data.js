@@ -23,6 +23,16 @@
   const MS_TABLE    = "MilestonesTable";
   const CFG_SHEET   = "Config";
 
+  // Which statuses mean "complete"? Set by the UI from StatusesTable's Bucket
+  // column so auto-100% + subtask close-out adapt to renamed statuses. Falls back
+  // to the literal "Done".
+  let _completeSet = new Set(["Done"]);
+  function setCompleteStatuses(names) {
+    _completeSet = new Set((names || []).map((n) => String(n)));
+    if (!_completeSet.size) _completeSet.add("Done");
+  }
+  function _isComplete(status) { return _completeSet.has(String(status)); }
+
   // Next-ID is computed as MAX(existing id) + 1 straight from each table. This is
   // immune to the Config "NextID" helper cells losing their formulas or being
   // shifted by added columns (both of which have happened).
@@ -281,7 +291,7 @@
 
     await _updateRowMulti(TASKS_TABLE, rowIndex, updates);
     // If this save sets the task to Done, close out its subtasks too (best-effort).
-    if (String(taskObj.Status) === "Done") {
+    if (_isComplete(taskObj.Status)) {
       try { await closeSubtasksForTask(taskObj.TaskID); }
       catch (e) { console.warn("closeSubtasksForTask failed (non-fatal):", e); }
     }
@@ -307,9 +317,9 @@
     };
     // Moving a task to Done marks it 100% complete. Reopening it (Done → other)
     // drops it to its subtask-completion ratio, or 90% if it has no subtasks.
-    if (String(newStatus) === "Done") {
+    if (_isComplete(newStatus)) {
       updates.PercentComplete = 100;
-    } else if (String(oldStatus) === "Done") {
+    } else if (_isComplete(oldStatus)) {
       const subs = await readSubtasksForTask(taskId);
       updates.PercentComplete = subs.length
         ? Math.round(subs.filter((s) => String(s.Done).toLowerCase() === "yes").length / subs.length * 100)
@@ -318,13 +328,13 @@
     await _updateRowMulti(TASKS_TABLE, rowIndex, updates);
     // ...and closes out all its subtasks with a completion date (best-effort:
     // a subtask hiccup must not undo the status change the user just made).
-    if (String(newStatus) === "Done") {
+    if (_isComplete(newStatus)) {
       try { await closeSubtasksForTask(taskId); }
       catch (e) { console.warn("closeSubtasksForTask failed (non-fatal):", e); }
     }
     // Only log real status changes — not pure within-column reordering.
     if (oldStatus !== newStatus) {
-      const action = String(newStatus) === "Done" ? "Completed" : "StatusChanged";
+      const action = _isComplete(newStatus) ? "Completed" : "StatusChanged";
       await logActivity("Task", taskId, action, "Status", oldStatus, newStatus, "");
     }
     return ts;
@@ -667,6 +677,14 @@
     if (!row) throw new Error('Status not found: ' + name);
     await _updateRow("StatusesTable", row._rowIndex, "Order", order);
   }
+  // Update arbitrary StatusesTable columns for a status (e.g. Bucket, Priority).
+  // Only columns that exist are written (missing ones are skipped).
+  async function updateStatusRow(name, fields) {
+    const all = await _readTable("StatusesTable");
+    const row = all.find((r) => String(_firstColValue(r)) === String(name));
+    if (!row) throw new Error('Status not found: ' + name);
+    await _updateRowMulti("StatusesTable", row._rowIndex, fields);
+  }
 
   // ----- Workstreams / Goals (tasks link by ID; renaming Name auto-propagates) -----
   // These log meaningful create/update/delete activity (not trivial UI actions).
@@ -749,7 +767,7 @@
     // config admin (write)
     addConfigValue, renameConfigValue, deleteConfigValue,
     countTasksByField, countTasksByWorkstream, countTasksByGoal,
-    renameOwner, renameQuarter, renameStatus, setStatusColor, setStatusOrder,
+    renameOwner, renameQuarter, renameStatus, setStatusColor, setStatusOrder, updateStatusRow, setCompleteStatuses,
     createWorkstream, updateWorkstream, deleteWorkstream,
     createGoal, updateGoal, deleteGoal,
     // milestones (standalone roadmap lines)

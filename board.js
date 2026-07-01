@@ -125,7 +125,7 @@
       "writeAttachment", "createAttachment", "deleteAttachment",
       "readConfigList", "addConfigValue", "renameConfigValue", "deleteConfigValue",
       "countTasksByField", "countTasksByWorkstream", "countTasksByGoal",
-      "renameOwner", "renameQuarter", "renameStatus", "setStatusColor", "setStatusOrder",
+      "renameOwner", "renameQuarter", "renameStatus", "setStatusColor", "setStatusOrder", "updateStatusRow", "setCompleteStatuses",
       "createWorkstream", "updateWorkstream", "deleteWorkstream",
       "createGoal", "updateGoal", "deleteGoal", "logActivity",
       "createMilestone", "updateMilestone", "deleteMilestone"
@@ -149,7 +149,7 @@
       "writeSubtask", "createSubtask", "deleteSubtask", "toggleSubtask",
       "writeAttachment", "createAttachment", "deleteAttachment",
       "addConfigValue", "renameConfigValue", "deleteConfigValue",
-      "renameOwner", "renameQuarter", "renameStatus", "setStatusColor", "setStatusOrder",
+      "renameOwner", "renameQuarter", "renameStatus", "setStatusColor", "setStatusOrder", "updateStatusRow", "setCompleteStatuses",
       "createWorkstream", "updateWorkstream", "deleteWorkstream",
       "createGoal", "updateGoal", "deleteGoal",
       "createMilestone", "updateMilestone", "deleteMilestone"
@@ -235,19 +235,31 @@
     State.goals = goals;
     State.workstreams = workstreams;
 
-    // StatusesTable optional columns: "Color" (per-status colour, unified everywhere)
-    // and "Order" (board-column order, so reordering persists to the workbook).
+    // StatusesTable optional columns drive everything status-related so the app
+    // adapts if statuses are renamed/restructured:
+    //   Color  — per-status colour (unified everywhere)
+    //   Order  — board-column order (persists to the workbook)
+    //   Bucket — ready | active | blocked | done  (top-of-page stats + "complete"/"blocked" semantics)
+    //   Priority — Yes/No (does this status feed "My priorities")
     State.statusColors = {};
+    State.statusMeta = {};                 // name → { bucket, priority }
     State.statusHasOrder = false;
     State.statusHasColor = false;
+    State.statusHasBucket = false;
+    State.statusHasPriority = false;
     try {
       const statusRows = await window.WsjfData._internal._readTable("StatusesTable");
-      State.statusHasOrder = statusRows.length > 0 && Object.prototype.hasOwnProperty.call(statusRows[0], "Order");
-      State.statusHasColor = statusRows.length > 0 && Object.prototype.hasOwnProperty.call(statusRows[0], "Color");
+      const has = (col) => statusRows.length > 0 && Object.prototype.hasOwnProperty.call(statusRows[0], col);
+      State.statusHasOrder = has("Order");
+      State.statusHasColor = has("Color");
+      State.statusHasBucket = has("Bucket");
+      State.statusHasPriority = has("Priority");
       const meta = statusRows.map((r) => {
         const keys = Object.keys(r).filter((k) => k !== "_rowIndex");
         return { name: String(r[keys[0]] == null ? "" : r[keys[0]]).trim(),
-                 order: r.Order, color: String(r.Color == null ? "" : r.Color).trim() };
+                 order: r.Order, color: String(r.Color == null ? "" : r.Color).trim(),
+                 bucket: String(r.Bucket == null ? "" : r.Bucket).trim().toLowerCase(),
+                 priority: /^(y|yes|true|1)$/i.test(String(r.Priority == null ? "" : r.Priority).trim()) };
       }).filter((m) => m.name);
       if (State.statusHasOrder) {
         meta.sort((a, b) => {
@@ -257,8 +269,18 @@
         });
         State.config.Statuses = meta.map((m) => m.name);   // honour the table's Order column
       }
-      meta.forEach((m) => { if (m.color) State.statusColors[m.name] = m.color; });
-    } catch (e) { State.statusColors = {}; }
+      meta.forEach((m) => {
+        if (m.color) State.statusColors[m.name] = m.color;
+        State.statusMeta[m.name] = { bucket: m.bucket, priority: State.statusHasPriority ? m.priority : null };
+      });
+    } catch (e) { State.statusColors = {}; State.statusMeta = {}; }
+
+    // Tell the data layer which statuses mean "complete" so its auto-100% + subtask
+    // close-out adapt to renamed statuses (falls back to "Done" if none flagged).
+    try {
+      const completeNames = (State.config.Statuses || []).filter((s) => statusBucket(s) === "done");
+      if (window.WsjfData.setCompleteStatuses) window.WsjfData.setCompleteStatuses(completeNames);
+    } catch (e) {}
 
     // Quarter start/end dates (if the QuartersTable carries them) drive
     // "days left" and the new-task due-date default instead of hardcoded ones.
@@ -581,7 +603,7 @@
   // Doesn't touch a Done task — that stays 100 until a user moves it.
   async function syncParentPctFromSubtasks(taskId) {
     const task = State.tasks.find((t) => Number(t.TaskID) === Number(taskId));
-    if (!task || task.Status === "Done") return;
+    if (!task || isCompleteStatus(task.Status)) return;
     const ratio = subtaskRatio(taskId);
     if (ratio == null || Number(task.PercentComplete) === ratio) return;
     task.PercentComplete = ratio;
@@ -635,7 +657,7 @@
 
     // Optimistic update locally (the DOM is already where Sortable dropped it).
     sourceTask.Status = newStatus;
-    if (newStatus === "Done") sourceTask.PercentComplete = 100;   // Done ⇒ 100%
+    if (isCompleteStatus(newStatus)) sourceTask.PercentComplete = 100;   // Done ⇒ 100%
     destCards.forEach((cardEl, idx) => {
       const tid = Number(cardEl.dataset.taskId);
       const t = State.tasks.find((x) => Number(x.TaskID) === tid);
@@ -644,8 +666,8 @@
 
     try {
       await window.WsjfData.writeTaskStatus(taskId, newStatus, newIndex + 1);
-      if (newStatus === "Done") { try { await loadAllSubtasks(); } catch (_) {} }
-      else if (oldStatus === "Done") {
+      if (isCompleteStatus(newStatus)) { try { await loadAllSubtasks(); } catch (_) {} }
+      else if (isCompleteStatus(oldStatus)) {
         // Reopening: mirror the server rule (subtask ratio, or 90% if none).
         const subs = State.subtasksByParent[taskId] || [];
         sourceTask.PercentComplete = subs.length
@@ -842,7 +864,7 @@
         return String(a).localeCompare(String(b), undefined, { numeric: true });
       }).forEach((label) => {
         const rows = groups.get(label);
-        const dn = rows.filter((t) => t.Status === "Done").length;
+        const dn = rows.filter((t) => isCompleteStatus(t.Status)).length;
         html += '<tr class="group-row"><td colspan="' + (LIST_COLS.length + 1) + '">' +
           escapeHtml(label) + ' <span class="group-count">' + dn + '/' + rows.length + ' done</span></td></tr>';
         rows.forEach((t) => { html += listRowHtml(t); });
@@ -1244,14 +1266,14 @@
     // "Connected" = I own it OR I'm a contributor.
     const isConnected = (t) => matchMe(t.Owner) || matchMe(t.Contributors);
     const mine = State.tasks.filter(isConnected);
-    const open = mine.filter((t) => t.Status !== "Done");
+    const open = mine.filter((t) => !isCompleteStatus(t.Status));
     const todayIso = new Date().toISOString().slice(0, 10);
     const in7Iso = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
     const dueIsoOf = (t) => isoDate(t.DueDate);
     const overdue = open.filter((t) => { const d = dueIsoOf(t); return d && d < todayIso; });
     const dueSoon = open.filter((t) => { const d = dueIsoOf(t); return d && d >= todayIso && d <= in7Iso; });
-    const blocked = mine.filter((t) => t.Status === "Blocked");
-    const doneThisQ = mine.filter((t) => t.Status === "Done" && t.Quarter === currentQuarter());
+    const blocked = mine.filter((t) => isBlockedStatus(t.Status));
+    const doneThisQ = mine.filter((t) => isCompleteStatus(t.Status) && t.Quarter === currentQuarter());
 
     const header = document.createElement("div");
     header.className = "mine-header";
@@ -1290,7 +1312,7 @@
     const priorities = active.sort(byDueThenWsjf);
     root.appendChild(mineSection("My priorities — by due date, then WSJF", priorities, "No active tasks. 🎉"));
 
-    const done = mine.filter((t) => t.Status === "Done").sort(byWsjfDesc).slice(0, 6);
+    const done = mine.filter((t) => isCompleteStatus(t.Status)).sort(byWsjfDesc).slice(0, 6);
     root.appendChild(mineSection("Recently completed", done, "Nothing completed yet."));
   }
 
@@ -1366,7 +1388,7 @@
     const subDone = subs.filter((s) => String(s.Done).toLowerCase() === "yes").length;
     const todayIso = new Date().toISOString().slice(0, 10);
     const dIso = isoDate(t.DueDate);
-    const isOverdue = dIso && dIso < todayIso && t.Status !== "Done";
+    const isOverdue = dIso && dIso < todayIso && !isCompleteStatus(t.Status);
     const owner = String(t.Owner || "").trim();
     const ownerHtml = owner
       ? '<span class="mine-owner"><span class="avatar avatar-sm" style="background:' + colorHash(owner) + '" title="' + escapeAttr(owner) + '">' + initialsFromName(owner) + '</span>' + escapeHtml(owner.split(" ")[0]) + '</span>'
@@ -1397,8 +1419,8 @@
   // Is an open task in trouble? Blocked, health-flagged, or overdue.
   // (The quarter dashboard adds a "behind pace" check on top of this.)
   function isAtRisk(t) {
-    if (t.Status === "Done") return false;
-    if (t.Status === "Blocked") return true;
+    if (isCompleteStatus(t.Status)) return false;
+    if (isBlockedStatus(t.Status)) return true;
     const h = String(t.Health || "");
     if (h === "At Risk" || h === "Off Track") return true;
     const d = isoDate(t.DueDate);
@@ -1476,9 +1498,9 @@
     const q = State.wsQuarter;
     const qtasks = State.tasks.filter((t) => t.Quarter === q);
     const total = qtasks.length;
-    const done = qtasks.filter((t) => t.Status === "Done").length;
+    const done = qtasks.filter((t) => isCompleteStatus(t.Status)).length;
     const pct = total ? Math.round((done / total) * 100) : 0;
-    const open = qtasks.filter((t) => t.Status !== "Done");
+    const open = qtasks.filter((t) => !isCompleteStatus(t.Status));
 
     // Pace: how far through the quarter are we vs. how much is done?
     const dleft = daysLeftInQuarter(q);
@@ -1489,7 +1511,7 @@
     // At risk = blocked / off-track / overdue (isAtRisk) OR "behind pace": an open
     // task whose % trails the quarter's elapsed % by >15 pts. This makes the list
     // reflect the "behind pace" banner instead of staying empty until tasks go overdue.
-    const behindPace = (t) => t.Status !== "Done" && elapsedPct != null &&
+    const behindPace = (t) => !isCompleteStatus(t.Status) && elapsedPct != null &&
       (Number(t.PercentComplete) || 0) < elapsedPct - 15;
     const atRisk = qtasks.filter((t) => isAtRisk(t) || behindPace(t)).sort(byWsjfDesc);
 
@@ -1609,10 +1631,10 @@
     const wsId = w.WorkstreamID;
     const tasks = State.tasks.filter((t) => t.WorkstreamID === wsId);
     const total = tasks.length;
-    const done = tasks.filter((t) => t.Status === "Done").length;
-    const blocked = tasks.filter((t) => t.Status === "Blocked").length;
+    const done = tasks.filter((t) => isCompleteStatus(t.Status)).length;
+    const blocked = tasks.filter((t) => isBlockedStatus(t.Status)).length;
     const todayIso = new Date().toISOString().slice(0, 10);
-    const overdue = tasks.filter((t) => t.Status !== "Done" && isoDate(t.DueDate) && isoDate(t.DueDate) < todayIso).length;
+    const overdue = tasks.filter((t) => !isCompleteStatus(t.Status) && isoDate(t.DueDate) && isoDate(t.DueDate) < todayIso).length;
     const pctDone = total ? Math.round((done / total) * 100) : 0;
     const avgWsjf = total ? (tasks.reduce((s, t) => s + (Number(t.WSJF) || 0), 0) / total) : 0;
     const cols = boardColumns();
@@ -1628,8 +1650,8 @@
       tasks.some((t) => t.Quarter === q));
     const qRowsHtml = quarters.map((q) => {
       const qt = tasks.filter((t) => t.Quarter === q);
-      const qd = qt.filter((t) => t.Status === "Done").length;
-      const qOver = qt.filter((t) => t.Status !== "Done" && isoDate(t.DueDate) && isoDate(t.DueDate) < todayIso).length;
+      const qd = qt.filter((t) => isCompleteStatus(t.Status)).length;
+      const qOver = qt.filter((t) => !isCompleteStatus(t.Status) && isoDate(t.DueDate) && isoDate(t.DueDate) < todayIso).length;
       const qpct = qt.length ? Math.round((qd / qt.length) * 100) : 0;
       return '<button class="ws-q-row" data-q="' + escapeAttr(q) + '" title="View ' + escapeAttr(q) + ' tasks">' +
         '<span class="ws-q-name">' + escapeHtml(q) + (qOver ? ' <span class="ws-q-over">⚠' + qOver + '</span>' : '') + '</span>' +
@@ -1921,7 +1943,7 @@
       const pct = Math.max(0, Math.min(100, Number(t.PercentComplete) || 0));
       const col = statusColor(t.Status);
       const hl = t.Health ? " rm-h-" + statusSlug(t.Health) : "";
-      const blocked = t.Status === "Blocked" ? " rm-blocked" : "";
+      const blocked = isBlockedStatus(t.Status) ? " rm-blocked" : "";
       const seld = State.roadmap.selected.has(Number(t.TaskID)) ? " rm-bar-sel" : "";
       const subs = State.subtasksByParent[t.TaskID] || [];
       const expanded = State.roadmap.expanded.has(Number(t.TaskID));
@@ -1969,7 +1991,7 @@
         .sort((a, b) => { const ra = rng(a).s, rb = rng(b).s; return ra < rb ? -1 : ra > rb ? 1 : 0; });
       if (!tasks.length) return;
       any = true;
-      const done = tasks.filter((t) => t.Status === "Done").length;
+      const done = tasks.filter((t) => isCompleteStatus(t.Status)).length;
       const w = State.workstreams.find((x) => x.WorkstreamID === wid);
       const owner = w && w.Owner ? String(w.Owner).split(/[;,]/)[0].trim() : "";
 
@@ -2183,7 +2205,7 @@
     const newQ = quarterOf(ns);
     const deltaMs = new Date(ns + "T00:00:00").getTime() - new Date(oldStart + "T00:00:00").getTime();
     const order = ["Q1", "Q2", "Q3", "Q4"];
-    const movable = task.Status !== "Backlog" && task.Status !== "Done";
+    const movable = !isReadyStatus(task.Status) && !isCompleteStatus(task.Status);
     let slipsDelta = 0, action = null;
 
     if (newQ && oldQ && newQ !== oldQ && movable) {
@@ -2278,7 +2300,7 @@
       const r = rng(t), left = pctOf(r.s), width = Math.max(1.5, pctOf(r.e) - left);
       const pct = Math.max(0, Math.min(100, Number(t.PercentComplete) || 0));
       const hl = t.Health ? " rm-h-" + statusSlug(t.Health) : "";
-      const blocked = t.Status === "Blocked" ? " rm-blocked" : "";
+      const blocked = isBlockedStatus(t.Status) ? " rm-blocked" : "";
       const bar = '<div class="rm-bar' + hl + blocked + '" style="left:' + left + '%;width:' + width + '%;background:' + statusColor(t.Status) + '" data-task-id="' + t.TaskID + '" title="' + escapeAttr(t.Title + " · " + (t.Status || "")) + '">' +
         '<span class="rm-handle rm-handle-l" data-grip="l"></span>' +
         '<span class="rm-bar-fill" style="width:' + pct + '%"></span>' + scheduleChip(t) +
@@ -2577,9 +2599,12 @@
     sec.appendChild(h);
     const p = document.createElement("p");
     p.className = "config-note";
-    p.innerHTML = "These are your Kanban columns. Rename cascades to every task. Use ▲▼ to set the column order, and the swatch to set each colour — used everywhere (board, list, roadmap). " +
-      (State.statusHasOrder ? "Order is saved to the StatusesTable <b>Order</b> column." : "<b>Add an “Order” column to StatusesTable</b> to save column order to the workbook (it's per-device until then).") +
-      (State.statusHasColor ? "" : " <b>Add a “Color” column to StatusesTable</b> to save colours.");
+    p.innerHTML = "Your Kanban columns. Rename cascades to every task; ▲▼ sets order; swatch sets colour (used everywhere). " +
+      "<b>Bucket</b> drives the My-Tasks stats + complete/blocked behaviour so things adapt if you rename statuses; <b>Priority</b> = show in My Priorities." +
+      (State.statusHasOrder ? "" : " <b>Add an “Order” column</b> to StatusesTable to persist order.") +
+      (State.statusHasColor ? "" : " <b>Add a “Color” column</b> for colours.") +
+      (State.statusHasBucket ? "" : " <b>Add a “Bucket” column</b> to persist buckets.") +
+      (State.statusHasPriority ? "" : " <b>Add a “Priority” column</b> to persist the priority flag.");
     sec.appendChild(p);
 
     const listEl = document.createElement("div");
@@ -2596,6 +2621,11 @@
       down.className = "btn btn-secondary btn-sm"; down.textContent = "▼"; down.disabled = idx === cols.length - 1; down.title = "Move right";
       const swatch = document.createElement("input"); swatch.type = "color"; swatch.className = "status-swatch"; swatch.value = statusColorHex(val); swatch.title = "Status colour";
       const input = document.createElement("input"); input.type = "text"; input.value = val;
+      const bucketSel = document.createElement("select"); bucketSel.className = "status-bucket"; bucketSel.title = "Bucket (drives My Tasks stats + complete/blocked behaviour)";
+      bucketSel.innerHTML = [["ready", "Ready"], ["active", "In progress"], ["blocked", "Blocked"], ["done", "Completed"]]
+        .map((b) => '<option value="' + b[0] + '"' + (statusBucket(val) === b[0] ? " selected" : "") + '>' + b[1] + '</option>').join("");
+      const prioLbl = document.createElement("label"); prioLbl.className = "status-prio"; prioLbl.title = "Show tasks with this status in My Priorities";
+      prioLbl.innerHTML = '<input type="checkbox"' + (isPriorityStatus(val) ? " checked" : "") + ' /> Priority';
       const tag = document.createElement("span"); tag.className = "config-id"; tag.textContent = counts[val] + " task" + (counts[val] === 1 ? "" : "s");
       const saveBtn = document.createElement("button"); saveBtn.className = "btn btn-secondary btn-sm"; saveBtn.textContent = "Rename";
       const delBtn = document.createElement("button"); delBtn.className = "btn btn-archive btn-sm"; delBtn.textContent = "Delete";
@@ -2604,6 +2634,20 @@
         configGuard(async () => {
           await window.WsjfData.setStatusColor(val, swatch.value);
           toast('Colour set for “' + val + '”.', "info");
+          await afterConfigChange();
+        });
+      });
+      bucketSel.addEventListener("change", () => {
+        configGuard(async () => {
+          await window.WsjfData.updateStatusRow(val, { Bucket: bucketSel.value });
+          toast('Bucket set for “' + val + '”.', "info");
+          await afterConfigChange();
+        });
+      });
+      prioLbl.querySelector("input").addEventListener("change", (e) => {
+        configGuard(async () => {
+          await window.WsjfData.updateStatusRow(val, { Priority: e.target.checked ? "Yes" : "No" });
+          toast('Priority ' + (e.target.checked ? "on" : "off") + ' for “' + val + '”.', "info");
           await afterConfigChange();
         });
       });
@@ -2675,7 +2719,7 @@
       });
 
       row.appendChild(up); row.appendChild(down);
-      row.appendChild(swatch); row.appendChild(input); row.appendChild(tag);
+      row.appendChild(swatch); row.appendChild(input); row.appendChild(bucketSel); row.appendChild(prioLbl); row.appendChild(tag);
       row.appendChild(saveBtn); row.appendChild(delBtn);
       listEl.appendChild(row);
     });
@@ -4101,9 +4145,9 @@
     // Done ⇒ 100%. Reopening (Done → other) drops to the subtask ratio, or 90% if
     // none — mirroring the board-drag rule — but only if % is still at the Done
     // value (don't override a % the user just set manually).
-    if (newStatus === "Done") {
+    if (isCompleteStatus(newStatus)) {
       t.PercentComplete = 100;
-    } else if (originalTaskSnapshot && originalTaskSnapshot.Status === "Done" && Number(t.PercentComplete) === 100) {
+    } else if (originalTaskSnapshot && isCompleteStatus(originalTaskSnapshot.Status) && Number(t.PercentComplete) === 100) {
       const sd = currentSubtasks.filter((s) => String(s.Done).toLowerCase() === "yes").length;
       t.PercentComplete = currentSubtasks.length ? Math.round((sd / currentSubtasks.length) * 100) : 90;
     }
@@ -4134,7 +4178,7 @@
         // Persist any subtask text/done edits that weren't flushed on blur.
         // If the task itself is now Done, every subtask closes with it (stay in
         // sync with the server-side cascade rather than re-opening them).
-        const taskDone = t.Status === "Done";
+        const taskDone = isCompleteStatus(t.Status);
         const doneToday = new Date().toISOString().slice(0, 10);
         for (const s of currentSubtasks) {
           const wasDone = String(s.Done).toLowerCase() === "yes";
@@ -4154,7 +4198,7 @@
         const newId = await window.WsjfData.createTask(t);
         t.TaskID = newId;
         // Flush any in-memory subtasks/attachments collected before the task existed
-        const createdDone = t.Status === "Done";
+        const createdDone = isCompleteStatus(t.Status);
         for (const s of currentSubtasks) {
           if (!s.SubtaskID && s.Text) {
             await window.WsjfData.createSubtask({
@@ -4304,6 +4348,29 @@
     const el = document.getElementById("m-status");
     if (el) el.style.setProperty("--sc", statusColor(el.value));
   }
+  // Config-driven status semantics (Bucket column) with a name heuristic fallback,
+  // so renaming/adding statuses adapts everywhere.
+  function statusBucket(name) {
+    const m = State.statusMeta && State.statusMeta[name];
+    if (m && m.bucket) return m.bucket;                 // explicit from StatusesTable
+    const s = statusSlug(name);
+    if (/(^|-)(done|complete|completed|closed|shipped|resolved)(-|$)/.test(s)) return "done";
+    if (/block/.test(s)) return "blocked";
+    if (/(progress|doing|active|wip|started|ongoing)/.test(s)) return "active";
+    return "ready";                                     // backlog / planned / ready / new / todo
+  }
+  function isCompleteStatus(s) { return statusBucket(s) === "done"; }
+  function isBlockedStatus(s) { return statusBucket(s) === "blocked"; }
+  function isActiveStatus(s) { return statusBucket(s) === "active"; }
+  function isReadyStatus(s) { return statusBucket(s) === "ready"; }
+  // Does a status feed "My priorities"? Explicit Priority flag, else default to active.
+  function isPriorityStatus(name) {
+    const m = State.statusMeta && State.statusMeta[name];
+    if (m && m.priority != null && State.statusHasPriority) return !!m.priority;
+    return statusBucket(name) === "active";
+  }
+  const BUCKET_LABEL = { ready: "Ready to begin", active: "In progress", blocked: "Blocked", done: "Completed" };
+
   // A guaranteed hex (for <input type="color">, which can't show hsl()).
   function statusColorHex(status) {
     const c = (State.statusColors && State.statusColors[status]) || STATUS_FALLBACK[statusSlug(status)];
@@ -4440,7 +4507,7 @@
   function personVelocity(person) {
     let pts = 0;
     State.tasks.forEach((t) => {
-      if (t.Quarter === "Q1" && t.Status === "Done" && ownerMatchesPerson(t, person)) pts += Number(t.JobSize) || 0;
+      if (t.Quarter === "Q1" && isCompleteStatus(t.Status) && ownerMatchesPerson(t, person)) pts += Number(t.JobSize) || 0;
     });
     return pts;
   }
