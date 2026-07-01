@@ -897,7 +897,7 @@ html, body {
 .mine-stat.stat-danger .ms-value { color: #CA001B; }
 .mine-stat.stat-warn .ms-value { color: #d97706; }
 .mine-stat.stat-good .ms-value { color: #137a3e; }
-.mine-section { margin-bottom: 24px; max-width: 960px; }
+.mine-section { margin-bottom: 24px; }
 .mine-section h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .03em; color: #666; margin: 0 0 10px; }
 .mine-empty { color: #aaa; font-style: italic; font-size: 13px; padding: 6px 0; }
 .mine-row {
@@ -944,8 +944,8 @@ html, body {
 .mine-board .kcol-head { position: static; }
 .mine-board .kcol-body { overflow: visible; min-height: 60px; max-height: 60vh; overflow-y: auto; }
 
-/* two-column footer: recent updates grouped by source */
-.mine-2col { display: grid; grid-template-columns: 1fr 360px; gap: 20px; align-items: start; }
+/* two-column footer (50/50, full width): recently completed | recent updates */
+.mine-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
 .mine-updgrp { margin-bottom: 12px; }
 .mine-updgrp-h { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; font-weight: 800; color: #6366f1; margin: 4px 0 6px; }
 
