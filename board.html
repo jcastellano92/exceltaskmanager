@@ -10,8 +10,8 @@
   <title>Product Management Tool</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
   <!-- Self-hosted (a CDN reference here gets blocked on locked-down corporate networks, which silently kills drag-and-drop). -->
-  <script src="sortable.min.js?v=20260701b"></script>
-  <link rel="stylesheet" href="board.css?v=20260701b" />
+  <script src="sortable.min.js?v=20260701d"></script>
+  <link rel="stylesheet" href="board.css?v=20260701d" />
 </head>
 <body>
 
@@ -38,6 +38,8 @@
       <div id="filter-panel" class="filter-panel" hidden>
         <div class="fp-row"><label>Owner</label>
           <select id="filter-owner" class="filter"><option value="">All Owners</option></select></div>
+        <div class="fp-row"><label title="Anyone attached: owner, contributor, or a subtask assignee">Contributor</label>
+          <select id="filter-contributor" class="filter"><option value="">Anyone</option></select></div>
         <div class="fp-row"><label>Workstream</label>
           <select id="filter-workstream" class="filter"><option value="">All Workstreams</option></select></div>
         <div class="fp-row"><label>Quarter</label>
@@ -314,7 +316,7 @@
 <!-- toasts -->
 <div id="toast-host" class="toast-host"></div>
 
-<script src="data.js?v=20260701b"></script>
-<script src="board.js?v=20260701b"></script>
+<script src="data.js?v=20260701d"></script>
+<script src="board.js?v=20260701d"></script>
 </body>
 </html>

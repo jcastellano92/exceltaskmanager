@@ -938,6 +938,17 @@ html, body {
 .mine-col-main { min-width: 0; }
 .mine-single { max-width: 900px; }
 
+/* My-tasks board = the same Kanban, embedded (auto height, page scrolls) */
+.mine-board { display: flex; gap: 12px; overflow-x: auto; align-items: start; padding: 2px 0 10px; }
+.mine-board .kcol { flex: 0 0 280px; max-height: none; }
+.mine-board .kcol-head { position: static; }
+.mine-board .kcol-body { overflow: visible; min-height: 60px; max-height: 60vh; overflow-y: auto; }
+
+/* two-column footer: recent updates grouped by source */
+.mine-2col { display: grid; grid-template-columns: 1fr 360px; gap: 20px; align-items: start; }
+.mine-updgrp { margin-bottom: 12px; }
+.mine-updgrp-h { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; font-weight: 800; color: #6366f1; margin: 4px 0 6px; }
+
 /* updates grouped with their item */
 .mine-updn { font-size: 11px; font-weight: 700; color: #6366f1; background: #eef2ff; border-radius: 999px; padding: 1px 7px; white-space: nowrap; }
 .mine-iupd-teaser { font-size: 12px; color: #555; background: #f7f8fa; border-radius: 0 0 8px 8px; padding: 6px 12px; margin: -4px 0 6px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-left: 3px solid #c8d0e0; }
@@ -949,8 +960,13 @@ html, body {
 .mine-iupd:first-of-type { border-top: none; }
 .mu-subname { color: #555; }
 
-/* owned-workstream cards, horizontal scroll */
-.mine-ws-scroll { display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 8px; }
+/* owned-workstream cards on My Tasks — reuse the Workstreams card for consistency */
+.mine-ws-scroll { display: flex; gap: 16px; overflow-x: auto; padding: 2px 2px 10px; align-items: start; }
+.mine-ws-scroll .ws-card { flex: 0 0 340px; }
+.ws-updates { border-top: 1px solid #f1f1f3; padding-top: 8px; }
+.ws-updates-list { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; }
+.ws-updates-list .mine-update { border-left: none; box-shadow: none; background: none; padding: 6px 0; border-radius: 0; border-bottom: 1px solid #f4f4f5; }
+.ws-updates-list .mine-update:last-child { border-bottom: none; }
 .mine-wscard { flex: 0 0 300px; background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.08); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
 .mine-wscard-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .mine-wscard-name { font-weight: 800; font-size: 14px; color: #1a1a1a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

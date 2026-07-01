@@ -49,7 +49,7 @@
     groupBy: "",                         // List view grouping: "" | WorkstreamID | Owner | Quarter | Status | GoalID
     listSort: { key: "WSJF", dir: "desc" }, // list view column sort
     listColFilters: {},                  // per-column filters (Sheets-style): key -> Set of allowed display values
-    filters: { owner: "", workstream: "", quarter: "", status: "", goal: "", rgroup: "", health: "", subtasks: "",
+    filters: { owner: "", contributor: "", workstream: "", quarter: "", status: "", goal: "", rgroup: "", health: "", subtasks: "",
                startFrom: "", startTo: "", dueFrom: "", dueTo: "", tags: new Set(), search: "" },
     selectedTags: new Set(),
     modalOpen: false,
@@ -313,6 +313,7 @@
     } catch (e) { State.capacity = {}; }
 
     fillSelect("filter-owner", ["", ...State.config.Owners], "All Owners");
+    fillSelect("filter-contributor", ["", ...State.config.Owners], "Anyone", State.filters.contributor);
     fillSelect("filter-workstream",
       [{ value: "", label: "All Workstreams" }].concat(
         State.workstreams.map((w) => ({ value: w.WorkstreamID, label: w.Name || w.WorkstreamID }))
@@ -431,11 +432,11 @@
     renderBoard();
   }
 
-  function renderBoard() {
-    const board = document.getElementById("kanban");
+  function renderBoard(boardEl, taskList) {
+    const board = boardEl || document.getElementById("kanban");
     board.innerHTML = "";
 
-    const visible = computeVisibleTasks();
+    const visible = taskList || computeVisibleTasks();
 
     boardColumns().forEach((status) => {
       const col = document.createElement("section");
@@ -467,7 +468,7 @@
       board.appendChild(col);
     });
 
-    initSortable();
+    initSortable(board);
   }
 
   function renderCard(task) {
@@ -611,7 +612,8 @@
     catch (e) { console.warn("syncParentPctFromSubtasks failed:", e); }
   }
 
-  function initSortable() {
+  function initSortable(boardEl) {
+    const scope = boardEl || document.getElementById("kanban");
     // Tear down previous instances
     State.sortableInstances.forEach((s) => { try { s.destroy(); } catch (_) {} });
     State.sortableInstances = [];
@@ -622,7 +624,7 @@
       return;
     }
     const manual = State.sort === "manual";
-    document.querySelectorAll(".kcol-body").forEach((body) => {
+    scope.querySelectorAll(".kcol-body").forEach((body) => {
       const s = Sortable.create(body, {
         group: "wsjf-board",
         animation: 150,
@@ -1175,6 +1177,14 @@
   function computeVisibleTasks() {
     return State.tasks.filter((t) => {
       if (State.filters.owner && !String(t.Owner || "").includes(State.filters.owner)) return false;
+      // Contributor filter = broad "attached to person": owner, contributor, or a subtask assignee.
+      if (State.filters.contributor) {
+        const p = State.filters.contributor;
+        const inOwner = String(t.Owner || "").includes(p);
+        const inContrib = String(t.Contributors || "").includes(p);
+        const inSub = (State.subtasksByParent[t.TaskID] || []).some((s) => String(s.Owner || "").includes(p));
+        if (!inOwner && !inContrib && !inSub) return false;
+      }
       if (State.filters.workstream && t.WorkstreamID !== State.filters.workstream) return false;
       if (State.filters.quarter && t.Quarter !== State.filters.quarter) return false;
       if (State.filters.status && String(t.Status || "") !== State.filters.status) return false;
@@ -1309,34 +1319,86 @@
       '<div class="ms-label">' + escapeHtml(BUCKET_LABEL[t.b]) + '</div></div>').join("");
     root.appendChild(stats);
 
-    // ── My workstreams (only if I own any) — horizontal-scroll row w/ updates ──
+    // ── My workstreams (only if I own any) — same card as the Workstreams view ──
     const ownedWs = State.workstreams.filter((w) => matchMe(w.Owner));
+    const ownedWsIds = new Set(ownedWs.map((w) => w.WorkstreamID));
     if (ownedWs.length) {
       const wsWrap = document.createElement("section");
       wsWrap.className = "mine-section";
       wsWrap.innerHTML = '<h3>My workstreams (' + ownedWs.length + ')</h3><div class="mine-ws-scroll"></div>';
       const scroll = wsWrap.querySelector(".mine-ws-scroll");
-      ownedWs.forEach((w) => scroll.appendChild(myWsCard(w)));
+      ownedWs.forEach((w) => scroll.appendChild(workstreamCard(w)));
       root.appendChild(wsWrap);
     }
 
-    // ── Single column: each item carries its own updates/activity, grouped ──
-    const main = document.createElement("div");
-    main.className = "mine-col-main mine-single";
-    root.appendChild(main);
+    // ── My tasks — the SAME board you use everywhere. Tasks I own/contribute to,
+    // plus any task where a subtask is assigned to me (subtasks show inside the card). ──
+    const myTaskIds = new Set(mine.map((t) => Number(t.TaskID)));
+    mySubs.forEach((s) => myTaskIds.add(Number(s._pid)));
+    const myTasks = State.tasks.filter((t) => myTaskIds.has(Number(t.TaskID)));
+    const boardWrap = document.createElement("section");
+    boardWrap.className = "mine-section";
+    boardWrap.innerHTML = '<h3>My tasks (' + myTasks.length + ')</h3><div class="mine-board" id="mine-board"></div>';
+    root.appendChild(boardWrap);
+    renderBoard(boardWrap.querySelector("#mine-board"), myTasks);
 
-    // Priorities: my open tasks whose status is flagged Priority, by due then WSJF.
-    // Recent updates (incl. this task's subtask updates) show grouped under each row.
-    const priorities = openTasks.filter((t) => isPriorityStatus(t.Status)).sort(byDueThenWsjf);
-    main.appendChild(mineSection("My priorities — by due date, then WSJF", priorities,
-      "No priority tasks right now. 🎉 (Flag which statuses count as priorities in Config.)", { subtasks: true, updates: true }));
+    // ── Two columns: Recently completed · Recent updates (by workstream/task/subtask) ──
+    const two = document.createElement("div");
+    two.className = "mine-2col";
+    const left = document.createElement("div"); left.className = "mine-col-main";
+    const right = document.createElement("div"); right.className = "mine-col-side";
+    two.appendChild(left); two.appendChild(right);
+    root.appendChild(two);
 
-    // My subtasks assigned to me (checkable), with their own updates inline.
-    main.appendChild(mineSubtaskSection(openSubs));
+    const done = mine.filter((t) => isCompleteStatus(t.Status)).sort(byDueThenWsjf).slice(0, 10);
+    left.appendChild(mineSection("Recently completed", done, "Nothing completed yet.", {}));
 
-    // Recently completed (no updates needed here).
-    const done = mine.filter((t) => isCompleteStatus(t.Status)).sort(byDueThenWsjf).slice(0, 8);
-    main.appendChild(mineSection("Recently completed", done, "Nothing completed yet.", { compact: true }));
+    right.appendChild(mineUpdatesGrouped(mine, mySubs, ownedWsIds));
+  }
+
+  // Recent updates split into Workstreams / Tasks / Subtasks. Each update lands in
+  // exactly one group: my subtask → Subtasks; else my task → Tasks; else a task in a
+  // workstream I own → Workstreams.
+  function mineUpdatesGrouped(mineTasks, mySubs, ownedWsIds) {
+    const sec = document.createElement("section");
+    sec.className = "mine-section mine-activity";
+    sec.innerHTML = '<h3>Recent updates</h3>';
+    const myTaskIds = new Set(mineTasks.map((t) => Number(t.TaskID)));
+    const mySubIds = new Set(mySubs.map((s) => Number(s.SubtaskID)));
+    const subParent = {};
+    Object.keys(State.subtasksByParent).forEach((pid) =>
+      (State.subtasksByParent[pid] || []).forEach((s) => { subParent[Number(s.SubtaskID)] = Number(pid); }));
+    const taskOf = (tid) => State.tasks.find((x) => Number(x.TaskID) === Number(tid));
+
+    const groups = { Workstreams: [], Tasks: [], Subtasks: [] };
+    (State.allUpdates || []).slice()
+      .sort((a, b) => String(b.AddedDate).localeCompare(String(a.AddedDate)))
+      .forEach((u) => {
+        const isSub = String(u.ParentType) === "Subtask";
+        const tid = isSub ? subParent[Number(u.ParentID)] : Number(u.ParentID);
+        if (tid == null) return;
+        const t = taskOf(tid);
+        const sub = isSub ? (State.subtasksByParent[tid] || []).find((s) => Number(s.SubtaskID) === Number(u.ParentID)) : null;
+        const r = { u: u, tid: tid, sub: sub ? (sub.Text || "") : "" };
+        if (isSub && mySubIds.has(Number(u.ParentID))) groups.Subtasks.push(r);
+        else if (!isSub && myTaskIds.has(tid)) groups.Tasks.push(r);
+        else if (t && ownedWsIds.has(t.WorkstreamID)) groups.Workstreams.push(r);
+      });
+
+    let any = false;
+    [["Workstreams", "My workstreams"], ["Tasks", "My tasks"], ["Subtasks", "My subtasks"]].forEach(([key, label]) => {
+      const rows = groups[key].slice(0, 8);
+      if (!rows.length) return;
+      any = true;
+      const box = document.createElement("div");
+      box.className = "mine-updgrp";
+      box.innerHTML = '<div class="mine-updgrp-h">' + escapeHtml(label) + ' (' + groups[key].length + ')</div>' + rows.map((r) => updateLineHtml(r, false)).join("");
+      Array.from(box.querySelectorAll("[data-upd-task]")).forEach((el) =>
+        el.addEventListener("click", () => openEditModal(Number(el.dataset.updTask))));
+      sec.appendChild(box);
+    });
+    if (!any) sec.innerHTML += '<div class="mine-empty">No recent updates on your items.</div>';
+    return sec;
   }
 
   // Buckets → a representative status name (for the tile's accent colour).
@@ -1367,32 +1429,6 @@
   }
 
   // Compact owned-workstream card for My Tasks: progress + at-risk + its recent updates.
-  function myWsCard(w) {
-    const wid = w.WorkstreamID;
-    const tasks = State.tasks.filter((t) => t.WorkstreamID === wid);
-    const total = tasks.length, done = tasks.filter((t) => isCompleteStatus(t.Status)).length;
-    const pctDone = total ? Math.round((done / total) * 100) : 0;
-    const atRisk = tasks.filter(isAtRisk).length;
-    const cols = boardColumns();
-    const counts = {}; cols.forEach((s) => { counts[s] = tasks.filter((t) => t.Status === s).length; });
-    const taskIds = new Set(tasks.map((t) => Number(t.TaskID)));
-    const ups = recentUpdateRows(taskIds, 20);   // all of the workstream's updates (scrollable)
-
-    const card = document.createElement("div");
-    card.className = "mine-wscard";
-    card.innerHTML =
-      '<div class="mine-wscard-head"><span class="mine-wscard-name" title="' + escapeAttr(workstreamName(wid)) + '">' + escapeHtml(workstreamName(wid)) + '</span>' +
-        '<button class="btn-link mine-wscard-view">View →</button></div>' +
-      '<div class="ws-statbar">' + cols.map((s) => counts[s] ? '<span class="ws-seg" style="flex:' + counts[s] + ';background:' + statusColor(s) + '"></span>' : '').join('') + '</div>' +
-      '<div class="mine-wscard-meta"><b>' + done + '/' + total + '</b> done · ' + pctDone + '%' + (atRisk ? ' · <span class="danger">' + atRisk + ' at risk</span>' : ' · on track') + '</div>' +
-      (ups.length ? '<div class="mine-wscard-ups">' + ups.map((r) => updateLineHtml(r, true)).join("") + '</div>' : '<div class="mine-wscard-ups muted">No recent updates</div>');
-    card.querySelector(".mine-wscard-view").addEventListener("click", () => {
-      State.filters.workstream = wid; State.viewMode = "board"; syncFilterControls(); render();
-    });
-    Array.from(card.querySelectorAll("[data-upd-task]")).forEach((el) =>
-      el.addEventListener("click", () => openEditModal(Number(el.dataset.updTask))));
-    return card;
-  }
 
   // Resolve recent Updates rows to {u, tid} for a set of task IDs (newest first).
   function recentUpdateRows(taskIdSet, limit) {
@@ -1781,7 +1817,8 @@
     return sec;
   }
 
-  function workstreamCard(w) {
+  function workstreamCard(w, opts) {
+    opts = opts || {};
     const wsId = w.WorkstreamID;
     const tasks = State.tasks.filter((t) => t.WorkstreamID === wsId);
     const total = tasks.length;
@@ -1850,6 +1887,20 @@
       syncFilterControls();       // reflect the drill-down in the filter chips + popover
       render();
     };
+    // Optional: grouped recent updates for this workstream (used on My Tasks).
+    if (opts.withUpdates) {
+      const ups = recentUpdateRows(new Set(tasks.map((t) => Number(t.TaskID))), 20);
+      const box = document.createElement("div");
+      box.className = "ws-updates";
+      box.innerHTML = '<div class="ws-sub-label">Recent updates</div>' +
+        (ups.length ? '<div class="ws-updates-list">' + ups.map((r) => updateLineHtml(r, true)).join("") + '</div>'
+                    : '<div class="muted" style="font-size:12px;">No recent updates.</div>');
+      const viewBtn = card.querySelector(".ws-view-tasks");
+      card.insertBefore(box, viewBtn);
+      Array.from(box.querySelectorAll("[data-upd-task]")).forEach((el) =>
+        el.addEventListener("click", () => openEditModal(Number(el.dataset.updTask))));
+    }
+
     card.querySelector(".ws-view-tasks").addEventListener("click", () => drillTo(""));
     Array.from(card.querySelectorAll(".ws-q-row")).forEach((b) =>
       b.addEventListener("click", () => drillTo(b.dataset.q)));
@@ -3040,6 +3091,9 @@
     document.getElementById("filter-owner").addEventListener("change", (e) => {
       State.filters.owner = e.target.value; render();
     });
+    document.getElementById("filter-contributor").addEventListener("change", (e) => {
+      State.filters.contributor = e.target.value; render();
+    });
     document.getElementById("filter-workstream").addEventListener("change", (e) => {
       State.filters.workstream = e.target.value; render();
     });
@@ -3153,7 +3207,7 @@
   // ───── Active-filter chips (always-visible "what am I looking at") ─────
   function clearAllFilters() {
     const f = State.filters;
-    f.owner = ""; f.workstream = ""; f.quarter = ""; f.status = ""; f.goal = ""; f.rgroup = ""; f.health = ""; f.subtasks = "";
+    f.owner = ""; f.contributor = ""; f.workstream = ""; f.quarter = ""; f.status = ""; f.goal = ""; f.rgroup = ""; f.health = ""; f.subtasks = "";
     f.startFrom = ""; f.startTo = ""; f.dueFrom = ""; f.dueTo = ""; f.search = "";
     State.selectedTags.clear();
     State.listColFilters = {};        // also clear the List per-column filters
@@ -3167,6 +3221,7 @@
     const f = State.filters;
     const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
     set("filter-owner", f.owner);
+    set("filter-contributor", f.contributor);
     set("filter-workstream", f.workstream);
     set("filter-quarter", f.quarter);
     set("filter-status", f.status);
@@ -3193,6 +3248,7 @@
     // Whole-view filters
     if (f.search)     chips.push({ label: 'Search: "' + f.search + '"', clear: () => { f.search = ""; } });
     if (f.owner)      chips.push({ label: "Owner: " + f.owner, clear: () => { f.owner = ""; } });
+    if (f.contributor) chips.push({ label: "Involves: " + f.contributor, clear: () => { f.contributor = ""; } });
     if (f.workstream) chips.push({ label: "Workstream: " + workstreamName(f.workstream), clear: () => { f.workstream = ""; } });
     if (f.goal)       chips.push({ label: "Goal: " + goalShort(f.goal), clear: () => { f.goal = ""; } });
     if (f.quarter)    chips.push({ label: "Quarter: " + f.quarter, clear: () => { f.quarter = ""; } });
@@ -3217,7 +3273,7 @@
     }
 
     // Badge on the Filters button counts panel filters (not search, not column filters).
-    const panelCount = ["owner", "workstream", "quarter", "status", "goal", "rgroup", "health", "subtasks", "startFrom", "startTo", "dueFrom", "dueTo"]
+    const panelCount = ["owner", "contributor", "workstream", "quarter", "status", "goal", "rgroup", "health", "subtasks", "startFrom", "startTo", "dueFrom", "dueTo"]
       .reduce((n, k) => n + (f[k] ? 1 : 0), 0) + State.selectedTags.size;
     const badge = document.getElementById("filter-count");
     if (badge) { if (panelCount > 0) { badge.textContent = panelCount; badge.hidden = false; } else badge.hidden = true; }
