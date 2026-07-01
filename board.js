@@ -1320,28 +1320,23 @@
       root.appendChild(wsWrap);
     }
 
-    // ── Two columns: left = my work, right = recent activity ──
-    const two = document.createElement("div");
-    two.className = "mine-2col";
-    const left = document.createElement("div"); left.className = "mine-col-main";
-    const right = document.createElement("div"); right.className = "mine-col-side";
-    two.appendChild(left); two.appendChild(right);
-    root.appendChild(two);
+    // ── Single column: each item carries its own updates/activity, grouped ──
+    const main = document.createElement("div");
+    main.className = "mine-col-main mine-single";
+    root.appendChild(main);
 
     // Priorities: my open tasks whose status is flagged Priority, by due then WSJF.
+    // Recent updates (incl. this task's subtask updates) show grouped under each row.
     const priorities = openTasks.filter((t) => isPriorityStatus(t.Status)).sort(byDueThenWsjf);
-    left.appendChild(mineSection("My priorities — by due date, then WSJF", priorities,
-      "No priority tasks right now. 🎉 (Flag which statuses count as priorities in Config.)", { subtasks: true }));
+    main.appendChild(mineSection("My priorities — by due date, then WSJF", priorities,
+      "No priority tasks right now. 🎉 (Flag which statuses count as priorities in Config.)", { subtasks: true, updates: true }));
 
-    // My subtasks assigned to me (checkable).
-    left.appendChild(mineSubtaskSection(openSubs));
+    // My subtasks assigned to me (checkable), with their own updates inline.
+    main.appendChild(mineSubtaskSection(openSubs));
 
     // Recently completed (no updates needed here).
     const done = mine.filter((t) => isCompleteStatus(t.Status)).sort(byDueThenWsjf).slice(0, 8);
-    left.appendChild(mineSection("Recently completed", done, "Nothing completed yet.", { compact: true }));
-
-    // Right rail: recent activity on the items I'm connected to (tasks + subtasks).
-    right.appendChild(mineActivityRail(mine, mySubs));
+    main.appendChild(mineSection("Recently completed", done, "Nothing completed yet.", { compact: true }));
   }
 
   // Buckets → a representative status name (for the tile's accent colour).
@@ -1381,7 +1376,7 @@
     const cols = boardColumns();
     const counts = {}; cols.forEach((s) => { counts[s] = tasks.filter((t) => t.Status === s).length; });
     const taskIds = new Set(tasks.map((t) => Number(t.TaskID)));
-    const ups = recentUpdateRows(taskIds, 2);
+    const ups = recentUpdateRows(taskIds, 20);   // all of the workstream's updates (scrollable)
 
     const card = document.createElement("div");
     card.className = "mine-wscard";
@@ -1431,19 +1426,6 @@
       '<div class="mu-meta">' + escapeHtml(r.u.AddedBy || "?") + ' · ' + relTime(r.u.AddedDate) + '</div></div>';
   }
 
-  // Right-rail recent activity for the tasks + subtasks I'm connected to.
-  function mineActivityRail(mineTasks, mySubs) {
-    const sec = document.createElement("section");
-    sec.className = "mine-section mine-activity";
-    const ids = new Set(mineTasks.map((t) => Number(t.TaskID)));
-    mySubs.forEach((s) => ids.add(Number(s._pid)));   // include parents of my subtasks
-    const rows = recentUpdateRows(ids, 12);
-    sec.innerHTML = '<h3>Recent activity (' + rows.length + ')</h3>' +
-      (rows.length ? rows.map((r) => updateLineHtml(r, false)).join("") : '<div class="mine-empty">No recent updates on your items.</div>');
-    Array.from(sec.querySelectorAll("[data-upd-task]")).forEach((el) =>
-      el.addEventListener("click", () => openEditModal(Number(el.dataset.updTask))));
-    return sec;
-  }
 
   // Subtasks assigned to me — checkable, with parent + workstream + due.
   function mineSubtaskSection(openSubs) {
@@ -1456,13 +1438,19 @@
       const t = State.tasks.find((x) => Number(x.TaskID) === Number(s._pid));
       const due = isoDate(s.DueDate);
       const overdue = due && due < todayIso;
+      // This subtask's own updates (grouped with it).
+      const subUps = (State.allUpdates || []).filter((u) => String(u.ParentType) === "Subtask" && Number(u.ParentID) === Number(s.SubtaskID))
+        .sort((a, b) => String(b.AddedDate).localeCompare(String(a.AddedDate)));
+      const wrap = document.createElement("div");
+      wrap.className = "mine-rowwrap";
       const row = document.createElement("div");
       row.className = "mine-subrow";
       row.innerHTML =
         '<input type="checkbox" class="mine-sub-cb" />' +
         '<span class="mine-sub-text">' + escapeHtml(s.Text || "") + '</span>' +
         (t ? '<span class="mine-ws" title="' + escapeAttr(t.Title) + '">' + escapeHtml(t.Title) + '</span>' : '') +
-        (due ? '<span class="mine-due' + (overdue ? " overdue" : "") + '">📅 ' + escapeHtml(formatDateShort(due)) + '</span>' : '');
+        (due ? '<span class="mine-due' + (overdue ? " overdue" : "") + '">📅 ' + escapeHtml(formatDateShort(due)) + '</span>' : '') +
+        (subUps.length ? '<span class="mine-updn">💬 ' + subUps.length + '</span>' : '');
       const cb = row.querySelector(".mine-sub-cb");
       cb.addEventListener("change", async () => {
         cb.disabled = true;
@@ -1475,7 +1463,17 @@
         } catch (e) { cb.disabled = false; toast("Couldn't check off: " + e.message, "error"); }
       });
       row.querySelector(".mine-sub-text").addEventListener("click", () => { if (t) openEditModal(Number(t.TaskID)); });
-      sec.appendChild(row);
+      wrap.appendChild(row);
+      if (subUps.length) {
+        const u = subUps[0];
+        const teaser = document.createElement("div");
+        teaser.className = "mine-iupd-teaser";
+        teaser.innerHTML = '💬 ' + escapeHtml(u.Text || "") + ' <span class="mu-meta">' + escapeHtml(u.AddedBy || "?") + ' · ' + relTime(u.AddedDate) +
+          (subUps.length > 1 ? ' · +' + (subUps.length - 1) + ' more' : '') + '</span>';
+        teaser.addEventListener("click", () => { if (t) openEditModal(Number(t.TaskID)); });
+        wrap.appendChild(teaser);
+      }
+      sec.appendChild(wrap);
     });
     return sec;
   }
@@ -1498,6 +1496,14 @@
     return sec;
   }
 
+  // Compact inline update line (grouped under its task/subtask).
+  function inlineUpdateHtml(r) {
+    const kind = r.sub ? '<span class="mu-kind">Subtask</span> <span class="mu-subname">' + escapeHtml(r.sub) + '</span>' : '';
+    return '<div class="mine-iupd">' + (kind ? '<div class="mu-task">' + kind + '</div>' : '') +
+      '<div class="mu-text">' + escapeHtml(r.u.Text || "") + '</div>' +
+      '<div class="mu-meta">' + escapeHtml(r.u.AddedBy || "?") + ' · ' + relTime(r.u.AddedDate) + '</div></div>';
+  }
+
   function mineTaskRow(t, opts) {
     opts = opts || {};
     const wsjf = Number(t.WSJF) || 0;
@@ -1509,7 +1515,9 @@
     const isOverdue = dIso && dIso < todayIso && !isCompleteStatus(t.Status);
     const wsName = workstreamName(t.WorkstreamID);
     const expanded = State.expandedSubtasks.has(Number(t.TaskID));
-    const canExpand = opts.subtasks && subs.length;
+    // This task's updates (its own + its subtasks'), newest first.
+    const ups = opts.updates ? recentUpdateRows(new Set([Number(t.TaskID)]), 20) : [];
+    const canExpand = opts.subtasks && (subs.length || ups.length);
     const wrap = document.createElement("div");
     wrap.className = "mine-rowwrap";
     const row = document.createElement("div");
@@ -1522,6 +1530,7 @@
       statusChip(t.Status) +
       (dIso ? '<span class="mine-due' + (isOverdue ? " overdue" : "") + '">📅 ' + escapeHtml(formatDateShort(t.DueDate)) + '</span>' : "") +
       (subs.length ? '<span class="mine-sub">✓ ' + subDone + '/' + subs.length + '</span>' : "") +
+      (ups.length ? '<span class="mine-updn" title="' + ups.length + ' update' + (ups.length === 1 ? "" : "s") + '">💬 ' + ups.length + '</span>' : "") +
       '<span class="mine-pct">' + pct + '%</span>';
     row.addEventListener("click", (e) => { if (e.target.closest(".mine-caret")) return; openEditModal(Number(t.TaskID)); });
     const caret = row.querySelector(".mine-caret");
@@ -1532,7 +1541,25 @@
       renderMyDashboard();
     });
     wrap.appendChild(row);
-    if (canExpand && expanded) wrap.appendChild(buildSubtaskAccordion(Number(t.TaskID)));
+
+    if (expanded) {
+      if (canExpand && subs.length) wrap.appendChild(buildSubtaskAccordion(Number(t.TaskID)));
+      if (ups.length) {
+        const upBox = document.createElement("div");
+        upBox.className = "mine-iupd-box";
+        upBox.innerHTML = '<div class="mine-iupd-head">Updates</div>' + ups.map(inlineUpdateHtml).join("");
+        wrap.appendChild(upBox);
+      }
+    } else if (ups.length) {
+      // Collapsed teaser: latest update, grouped with the item.
+      const teaser = document.createElement("div");
+      teaser.className = "mine-iupd-teaser";
+      teaser.innerHTML = '💬 ' + (ups[0].sub ? '<span class="mu-kind">Subtask</span> ' : '') + escapeHtml(ups[0].u.Text || "") +
+        ' <span class="mu-meta">' + escapeHtml(ups[0].u.AddedBy || "?") + ' · ' + relTime(ups[0].u.AddedDate) +
+        (ups.length > 1 ? ' · +' + (ups.length - 1) + ' more' : '') + '</span>';
+      teaser.addEventListener("click", () => { State.expandedSubtasks.add(Number(t.TaskID)); renderMyDashboard(); });
+      wrap.appendChild(teaser);
+    }
     return wrap;
   }
 

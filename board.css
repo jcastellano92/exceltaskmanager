@@ -935,9 +935,19 @@ html, body {
 .mine-ctx-alert { background: #fdecee; color: #CA001B; }
 .mine-stats .mine-stat { text-align: left; }
 .mine-stat.bstat-blocked .ms-value, .mine-stat.bstat-blocked { }
-.mine-2col { display: grid; grid-template-columns: 1fr 320px; gap: 20px; align-items: start; max-width: 1200px; }
-.mine-col-main, .mine-col-side { min-width: 0; }
-.mine-col-side .mine-section { position: sticky; top: 8px; }
+.mine-col-main { min-width: 0; }
+.mine-single { max-width: 900px; }
+
+/* updates grouped with their item */
+.mine-updn { font-size: 11px; font-weight: 700; color: #6366f1; background: #eef2ff; border-radius: 999px; padding: 1px 7px; white-space: nowrap; }
+.mine-iupd-teaser { font-size: 12px; color: #555; background: #f7f8fa; border-radius: 0 0 8px 8px; padding: 6px 12px; margin: -4px 0 6px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-left: 3px solid #c8d0e0; }
+.mine-iupd-teaser:hover { background: #eef2ff; }
+.mine-iupd-teaser .mu-meta { display: inline; }
+.mine-iupd-box { background: #f7f8fa; border-radius: 0 0 8px 8px; padding: 8px 12px; margin: -4px 0 8px; border-left: 3px solid #c8102e; }
+.mine-iupd-head { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #999; font-weight: 800; margin-bottom: 6px; }
+.mine-iupd { padding: 5px 0; border-top: 1px solid #ececf0; }
+.mine-iupd:first-of-type { border-top: none; }
+.mu-subname { color: #555; }
 
 /* owned-workstream cards, horizontal scroll */
 .mine-ws-scroll { display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 8px; }
@@ -947,7 +957,7 @@ html, body {
 .mine-wscard-view { flex: 0 0 auto; }
 .mine-wscard-meta { font-size: 12px; color: #666; }
 .mine-wscard-meta .danger { color: #CA001B; font-weight: 700; }
-.mine-wscard-ups { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid #f1f1f3; padding-top: 6px; }
+.mine-wscard-ups { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid #f1f1f3; padding-top: 6px; max-height: 200px; overflow-y: auto; }
 .mine-wscard-ups.muted { font-size: 11px; font-style: italic; }
 .mine-wscard-ups .mine-update { border-left: none; padding: 4px 0; box-shadow: none; background: none; }
 
