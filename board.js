@@ -36,7 +36,7 @@
     goals: [],
     workstreams: [],
     view: "all",                         // always show all tasks; narrow with the filters
-    viewMode: "board",                   // "board" | "list" | "mine" | "ws" | "config"
+    viewMode: "mine",                    // default landing = My Tasks. "board" | "list" | "mine" | "ws" | "config"
     wsQuarter: "",                       // focused quarter on the Workstreams dashboard
     quarterDates: {},                    // { Q1: {start, end}, … } from QuartersTable
     capacity: {},                        // { person: {availability, baseline} } from CapacityTable
@@ -1260,60 +1260,107 @@
       return;
     }
 
+    refreshBucketStatusColors();
     const meName = State.me.name.toLowerCase();
     const meEmail = State.me.email ? String(State.me.email).toLowerCase() : "";
-    const matchMe = (s) => { const v = String(s || "").toLowerCase(); return v.includes(meName) || (meEmail && v.includes(meEmail)); };
-    // "Connected" = I own it OR I'm a contributor.
+    const matchMe = (s) => { const v = String(s || "").toLowerCase(); return !!v && (v.includes(meName) || (meEmail && v.includes(meEmail))); };
     const isConnected = (t) => matchMe(t.Owner) || matchMe(t.Contributors);
     const mine = State.tasks.filter(isConnected);
-    const open = mine.filter((t) => !isCompleteStatus(t.Status));
-    const todayIso = new Date().toISOString().slice(0, 10);
-    const in7Iso = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
-    const dueIsoOf = (t) => isoDate(t.DueDate);
-    const overdue = open.filter((t) => { const d = dueIsoOf(t); return d && d < todayIso; });
-    const dueSoon = open.filter((t) => { const d = dueIsoOf(t); return d && d >= todayIso && d <= in7Iso; });
-    const blocked = mine.filter((t) => isBlockedStatus(t.Status));
-    const doneThisQ = mine.filter((t) => isCompleteStatus(t.Status) && t.Quarter === currentQuarter());
+    // Subtasks assigned to me (across everyone's tasks).
+    const mySubs = [];
+    Object.keys(State.subtasksByParent).forEach((pid) =>
+      (State.subtasksByParent[pid] || []).forEach((s) => { if (matchMe(s.Owner)) mySubs.push(Object.assign({ _pid: Number(pid) }, s)); }));
 
+    const q = currentQuarter();
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const in14Iso = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
+    const openTasks = mine.filter((t) => !isCompleteStatus(t.Status));
+    const openSubs = mySubs.filter((s) => String(s.Done).toLowerCase() !== "yes");
+
+    // Quarter buckets (my connected tasks in the current quarter).
+    const qMine = mine.filter((t) => t.Quarter === q);
+    const bcount = (b) => qMine.filter((t) => statusBucket(t.Status) === b).length;
+    const tiles = [
+      { b: "ready", n: bcount("ready") }, { b: "active", n: bcount("active") },
+      { b: "blocked", n: bcount("blocked") }, { b: "done", n: bcount("done") }
+    ];
+
+    // Due soon / overdue across my open tasks AND my open subtasks.
+    const odue = (d) => { const x = isoDate(d); return x && x < todayIso; };
+    const soon = (d) => { const x = isoDate(d); return x && x >= todayIso && x <= in14Iso; };
+    const overdueN = openTasks.filter((t) => odue(t.DueDate)).length + openSubs.filter((s) => odue(s.DueDate)).length;
+    const dueSoonN = openTasks.filter((t) => soon(t.DueDate)).length + openSubs.filter((s) => soon(s.DueDate)).length;
+    const weeks = workWeeksLeft(q);
+
+    // ── Header + context bar ──
     const header = document.createElement("div");
     header.className = "mine-header";
-    header.innerHTML = '<h2>My Tasks</h2><span class="mine-who"></span>';
-    header.querySelector(".mine-who").textContent = State.me.name + " · owned + contributing";
+    header.innerHTML = '<h2>My Tasks</h2><span class="mine-who">' + escapeHtml(State.me.name) + '</span>' +
+      '<span class="mine-ctx"><b>' + escapeHtml(q) + '</b> · ' + (weeks == null ? "—" : weeks + " work week" + (weeks === 1 ? "" : "s") + " left") + '</span>' +
+      '<span class="mine-ctx mine-ctx-soon' + (dueSoonN ? " on" : "") + '">⏳ ' + dueSoonN + ' due ≤14d</span>' +
+      (overdueN ? '<span class="mine-ctx mine-ctx-alert">⚠ ' + overdueN + ' overdue</span>' : '');
     root.appendChild(header);
 
+    // ── Bucket stat tiles ──
     const stats = document.createElement("div");
     stats.className = "mine-stats";
-    const cards = [
-      { label: "Open", value: open.length, cls: "" },
-      { label: "Overdue", value: overdue.length, cls: overdue.length ? "stat-danger" : "" },
-      { label: "Due ≤ 7 days", value: dueSoon.length, cls: dueSoon.length ? "stat-warn" : "" },
-      { label: "Blocked", value: blocked.length, cls: blocked.length ? "stat-danger" : "" },
-      { label: "Done this " + currentQuarter(), value: doneThisQ.length, cls: "stat-good" }
-    ];
-    stats.innerHTML = cards.map((c) =>
-      '<div class="mine-stat ' + c.cls + '"><div class="ms-value">' + c.value + '</div><div class="ms-label">' + escapeHtml(c.label) + '</div></div>'
-    ).join("");
+    stats.innerHTML = tiles.map((t) =>
+      '<div class="mine-stat bstat-' + t.b + '"><div class="ms-value" style="color:' + statusColor(BUCKET_STATUS[t.b] || "") + '">' + t.n + '</div>' +
+      '<div class="ms-label">' + escapeHtml(BUCKET_LABEL[t.b]) + '</div></div>').join("");
     root.appendChild(stats);
 
-    // ⚠ Needs attention = overdue or blocked. Only shown when there's something —
-    // so it's never a confusing empty "(0)" section.
-    const attention = overdue.concat(blocked.filter((b) => overdue.indexOf(b) < 0)).sort(byDueThenWsjf);
-    if (attention.length) {
-      root.appendChild(mineSection("⚠ Needs attention — overdue or blocked", attention, ""));
+    // ── My workstreams (only if I own any) — horizontal-scroll row w/ updates ──
+    const ownedWs = State.workstreams.filter((w) => matchMe(w.Owner));
+    if (ownedWs.length) {
+      const wsWrap = document.createElement("section");
+      wsWrap.className = "mine-section";
+      wsWrap.innerHTML = '<h3>My workstreams (' + ownedWs.length + ')</h3><div class="mine-ws-scroll"></div>';
+      const scroll = wsWrap.querySelector(".mine-ws-scroll");
+      ownedWs.forEach((w) => scroll.appendChild(myWsCard(w)));
+      root.appendChild(wsWrap);
     }
 
-    // Recent updates on tasks I'm connected to.
-    const updSec = buildRecentUpdates(mine);
-    if (updSec) root.appendChild(updSec);
+    // ── Two columns: left = my work, right = recent activity ──
+    const two = document.createElement("div");
+    two.className = "mine-2col";
+    const left = document.createElement("div"); left.className = "mine-col-main";
+    const right = document.createElement("div"); right.className = "mine-col-side";
+    two.appendChild(left); two.appendChild(right);
+    root.appendChild(two);
 
-    // Priorities = active work (excludes Backlog and Done), soonest due first, then WSJF.
-    const attSet = new Set(attention.map((t) => Number(t.TaskID)));
-    const active = open.filter((t) => t.Status !== "Backlog" && !attSet.has(Number(t.TaskID)));
-    const priorities = active.sort(byDueThenWsjf);
-    root.appendChild(mineSection("My priorities — by due date, then WSJF", priorities, "No active tasks. 🎉"));
+    // Priorities: my open tasks whose status is flagged Priority, by due then WSJF.
+    const priorities = openTasks.filter((t) => isPriorityStatus(t.Status)).sort(byDueThenWsjf);
+    left.appendChild(mineSection("My priorities — by due date, then WSJF", priorities,
+      "No priority tasks right now. 🎉 (Flag which statuses count as priorities in Config.)", { subtasks: true }));
 
-    const done = mine.filter((t) => isCompleteStatus(t.Status)).sort(byWsjfDesc).slice(0, 6);
-    root.appendChild(mineSection("Recently completed", done, "Nothing completed yet."));
+    // My subtasks assigned to me (checkable).
+    left.appendChild(mineSubtaskSection(openSubs));
+
+    // Recently completed (no updates needed here).
+    const done = mine.filter((t) => isCompleteStatus(t.Status)).sort(byDueThenWsjf).slice(0, 8);
+    left.appendChild(mineSection("Recently completed", done, "Nothing completed yet.", { compact: true }));
+
+    // Right rail: recent activity on the items I'm connected to (tasks + subtasks).
+    right.appendChild(mineActivityRail(mine, mySubs));
+  }
+
+  // Buckets → a representative status name (for the tile's accent colour).
+  const BUCKET_STATUS = {};
+  function refreshBucketStatusColors() {
+    BUCKET_STATUS.ready = BUCKET_STATUS.active = BUCKET_STATUS.blocked = BUCKET_STATUS.done = "";
+    (State.config.Statuses || []).forEach((s) => { const b = statusBucket(s); if (!BUCKET_STATUS[b]) BUCKET_STATUS[b] = s; });
+  }
+
+  // "Work weeks" left in a quarter (business days ÷ 5), or null if unknown.
+  function workWeeksLeft(q) {
+    const end = quarterEndDate(q);
+    if (!end) return null;
+    let d = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00");
+    const endDt = new Date(end + "T00:00:00");
+    if (endDt < d) return 0;
+    let bd = 0, guard = 0;
+    while (d <= endDt && guard++ < 400) { const dow = d.getDay(); if (dow >= 1 && dow <= 5) bd++; d = new Date(d.getTime() + 86400000); }
+    return Math.max(0, Math.round((bd / 5) * 10) / 10);
   }
 
   // Soonest due first (no due date = last), then highest WSJF.
@@ -1324,47 +1371,117 @@
     return (Number(b.WSJF) || 0) - (Number(a.WSJF) || 0);
   }
 
-  // "Recent updates" feed for the My Tasks view — newest updates on any task the
-  // user owns or contributes to (including updates posted on its subtasks).
-  function buildRecentUpdates(mineTasks) {
-    if (!State.allUpdates || !State.allUpdates.length) return null;
-    const myTaskIds = new Set(mineTasks.map((t) => Number(t.TaskID)));
-    // subtaskId → parentTaskId
-    const subParent = {};
-    Object.keys(State.subtasksByParent).forEach((pid) => {
-      (State.subtasksByParent[pid] || []).forEach((s) => { subParent[Number(s.SubtaskID)] = Number(pid); });
-    });
-    const titleOf = (tid) => { const t = State.tasks.find((x) => Number(x.TaskID) === Number(tid)); return t ? t.Title : ""; };
-    const rows = State.allUpdates.map((u) => {
-      let tid = null;
-      if (String(u.ParentType) === "Task") tid = Number(u.ParentID);
-      else if (String(u.ParentType) === "Subtask") tid = subParent[Number(u.ParentID)];
-      return { u: u, tid: tid };
-    }).filter((r) => r.tid != null && myTaskIds.has(r.tid))
-      .sort((a, b) => String(b.u.AddedDate).localeCompare(String(a.u.AddedDate)))
-      .slice(0, 6);
-    if (!rows.length) return null;
+  // Compact owned-workstream card for My Tasks: progress + at-risk + its recent updates.
+  function myWsCard(w) {
+    const wid = w.WorkstreamID;
+    const tasks = State.tasks.filter((t) => t.WorkstreamID === wid);
+    const total = tasks.length, done = tasks.filter((t) => isCompleteStatus(t.Status)).length;
+    const pctDone = total ? Math.round((done / total) * 100) : 0;
+    const atRisk = tasks.filter(isAtRisk).length;
+    const cols = boardColumns();
+    const counts = {}; cols.forEach((s) => { counts[s] = tasks.filter((t) => t.Status === s).length; });
+    const taskIds = new Set(tasks.map((t) => Number(t.TaskID)));
+    const ups = recentUpdateRows(taskIds, 2);
 
+    const card = document.createElement("div");
+    card.className = "mine-wscard";
+    card.innerHTML =
+      '<div class="mine-wscard-head"><span class="mine-wscard-name" title="' + escapeAttr(workstreamName(wid)) + '">' + escapeHtml(workstreamName(wid)) + '</span>' +
+        '<button class="btn-link mine-wscard-view">View →</button></div>' +
+      '<div class="ws-statbar">' + cols.map((s) => counts[s] ? '<span class="ws-seg" style="flex:' + counts[s] + ';background:' + statusColor(s) + '"></span>' : '').join('') + '</div>' +
+      '<div class="mine-wscard-meta"><b>' + done + '/' + total + '</b> done · ' + pctDone + '%' + (atRisk ? ' · <span class="danger">' + atRisk + ' at risk</span>' : ' · on track') + '</div>' +
+      (ups.length ? '<div class="mine-wscard-ups">' + ups.map((r) => updateLineHtml(r, true)).join("") + '</div>' : '<div class="mine-wscard-ups muted">No recent updates</div>');
+    card.querySelector(".mine-wscard-view").addEventListener("click", () => {
+      State.filters.workstream = wid; State.viewMode = "board"; syncFilterControls(); render();
+    });
+    Array.from(card.querySelectorAll("[data-upd-task]")).forEach((el) =>
+      el.addEventListener("click", () => openEditModal(Number(el.dataset.updTask))));
+    return card;
+  }
+
+  // Resolve recent Updates rows to {u, tid} for a set of task IDs (newest first).
+  function recentUpdateRows(taskIdSet, limit) {
+    if (!State.allUpdates || !State.allUpdates.length) return [];
+    const subParent = {};
+    Object.keys(State.subtasksByParent).forEach((pid) =>
+      (State.subtasksByParent[pid] || []).forEach((s) => { subParent[Number(s.SubtaskID)] = Number(pid); }));
+    return State.allUpdates.map((u) => {
+      let tid = null, subText = "";
+      if (String(u.ParentType) === "Task") tid = Number(u.ParentID);
+      else if (String(u.ParentType) === "Subtask") {
+        tid = subParent[Number(u.ParentID)];
+        const sub = (State.subtasksByParent[tid] || []).find((s) => Number(s.SubtaskID) === Number(u.ParentID));
+        subText = sub ? (sub.Text || "") : "";
+      }
+      return { u: u, tid: tid, sub: subText };
+    }).filter((r) => r.tid != null && taskIdSet.has(r.tid))
+      .sort((a, b) => String(b.u.AddedDate).localeCompare(String(a.u.AddedDate)))
+      .slice(0, limit || 6);
+  }
+
+  function updateLineHtml(r, compact) {
+    const t = State.tasks.find((x) => Number(x.TaskID) === Number(r.tid));
+    const title = t ? t.Title : "";
+    const ws = t ? workstreamName(t.WorkstreamID) : "";
+    const tag = r.sub ? '<span class="mu-kind">Subtask</span> ' + escapeHtml(r.sub) : '<span class="mu-kind mu-kind-task">Task</span> ' + escapeHtml(title);
+    return '<div class="mine-update" data-upd-task="' + r.tid + '">' +
+      '<div class="mu-task">' + tag + '</div>' +
+      (r.sub && title ? '<div class="mu-on">on ' + escapeHtml(title) + (ws && ws !== "—" ? ' · ' + escapeHtml(ws) : '') + '</div>' : (ws && ws !== "—" ? '<div class="mu-on">' + escapeHtml(ws) + '</div>' : '')) +
+      '<div class="mu-text">' + escapeHtml(r.u.Text || "") + '</div>' +
+      '<div class="mu-meta">' + escapeHtml(r.u.AddedBy || "?") + ' · ' + relTime(r.u.AddedDate) + '</div></div>';
+  }
+
+  // Right-rail recent activity for the tasks + subtasks I'm connected to.
+  function mineActivityRail(mineTasks, mySubs) {
+    const sec = document.createElement("section");
+    sec.className = "mine-section mine-activity";
+    const ids = new Set(mineTasks.map((t) => Number(t.TaskID)));
+    mySubs.forEach((s) => ids.add(Number(s._pid)));   // include parents of my subtasks
+    const rows = recentUpdateRows(ids, 12);
+    sec.innerHTML = '<h3>Recent activity (' + rows.length + ')</h3>' +
+      (rows.length ? rows.map((r) => updateLineHtml(r, false)).join("") : '<div class="mine-empty">No recent updates on your items.</div>');
+    Array.from(sec.querySelectorAll("[data-upd-task]")).forEach((el) =>
+      el.addEventListener("click", () => openEditModal(Number(el.dataset.updTask))));
+    return sec;
+  }
+
+  // Subtasks assigned to me — checkable, with parent + workstream + due.
+  function mineSubtaskSection(openSubs) {
     const sec = document.createElement("section");
     sec.className = "mine-section";
-    const h = document.createElement("h3");
-    h.textContent = "Recent updates (" + rows.length + ")";
-    sec.appendChild(h);
-    rows.forEach((r) => {
-      const div = document.createElement("div");
-      div.className = "mine-update";
-      div.innerHTML =
-        '<div class="mu-task">' + escapeHtml(titleOf(r.tid)) +
-          (String(r.u.ParentType) === "Subtask" ? ' <span class="mu-on">· subtask</span>' : '') + '</div>' +
-        '<div class="mu-text">' + escapeHtml(r.u.Text || "") + '</div>' +
-        '<div class="mu-meta">' + escapeHtml(r.u.AddedBy || "?") + ' · ' + relTime(r.u.AddedDate) + '</div>';
-      div.addEventListener("click", () => openEditModal(Number(r.tid)));
-      sec.appendChild(div);
+    sec.innerHTML = '<h3>My subtasks (' + openSubs.length + ')</h3>';
+    if (!openSubs.length) { sec.innerHTML += '<div class="mine-empty">No open subtasks assigned to you.</div>'; return sec; }
+    const todayIso = new Date().toISOString().slice(0, 10);
+    openSubs.slice().sort((a, b) => (isoDate(a.DueDate) || "9999-12-31") < (isoDate(b.DueDate) || "9999-12-31") ? -1 : 1).forEach((s) => {
+      const t = State.tasks.find((x) => Number(x.TaskID) === Number(s._pid));
+      const due = isoDate(s.DueDate);
+      const overdue = due && due < todayIso;
+      const row = document.createElement("div");
+      row.className = "mine-subrow";
+      row.innerHTML =
+        '<input type="checkbox" class="mine-sub-cb" />' +
+        '<span class="mine-sub-text">' + escapeHtml(s.Text || "") + '</span>' +
+        (t ? '<span class="mine-ws" title="' + escapeAttr(t.Title) + '">' + escapeHtml(t.Title) + '</span>' : '') +
+        (due ? '<span class="mine-due' + (overdue ? " overdue" : "") + '">📅 ' + escapeHtml(formatDateShort(due)) + '</span>' : '');
+      const cb = row.querySelector(".mine-sub-cb");
+      cb.addEventListener("change", async () => {
+        cb.disabled = true;
+        try {
+          await window.WsjfData.toggleSubtask(s.SubtaskID, true);
+          const arr = State.subtasksByParent[s._pid] || [];
+          const it = arr.find((x) => Number(x.SubtaskID) === Number(s.SubtaskID)); if (it) it.Done = "Yes";
+          await syncParentPctFromSubtasks(s._pid);
+          renderMyDashboard();
+        } catch (e) { cb.disabled = false; toast("Couldn't check off: " + e.message, "error"); }
+      });
+      row.querySelector(".mine-sub-text").addEventListener("click", () => { if (t) openEditModal(Number(t.TaskID)); });
+      sec.appendChild(row);
     });
     return sec;
   }
 
-  function mineSection(title, tasks, emptyMsg) {
+  function mineSection(title, tasks, emptyMsg, opts) {
+    opts = opts || {};
     const sec = document.createElement("section");
     sec.className = "mine-section";
     const h = document.createElement("h3");
@@ -1377,11 +1494,12 @@
       sec.appendChild(e);
       return sec;
     }
-    tasks.forEach((t) => sec.appendChild(mineTaskRow(t)));
+    tasks.forEach((t) => sec.appendChild(mineTaskRow(t, opts)));
     return sec;
   }
 
-  function mineTaskRow(t) {
+  function mineTaskRow(t, opts) {
+    opts = opts || {};
     const wsjf = Number(t.WSJF) || 0;
     const pct = Math.max(0, Math.min(100, Number(t.PercentComplete) || 0));
     const subs = State.subtasksByParent[t.TaskID] || [];
@@ -1389,24 +1507,33 @@
     const todayIso = new Date().toISOString().slice(0, 10);
     const dIso = isoDate(t.DueDate);
     const isOverdue = dIso && dIso < todayIso && !isCompleteStatus(t.Status);
-    const owner = String(t.Owner || "").trim();
-    const ownerHtml = owner
-      ? '<span class="mine-owner"><span class="avatar avatar-sm" style="background:' + colorHash(owner) + '" title="' + escapeAttr(owner) + '">' + initialsFromName(owner) + '</span>' + escapeHtml(owner.split(" ")[0]) + '</span>'
-      : "";
     const wsName = workstreamName(t.WorkstreamID);
+    const expanded = State.expandedSubtasks.has(Number(t.TaskID));
+    const canExpand = opts.subtasks && subs.length;
+    const wrap = document.createElement("div");
+    wrap.className = "mine-rowwrap";
     const row = document.createElement("div");
     row.className = "mine-row";
     row.innerHTML =
+      (canExpand ? '<button class="mine-caret">' + (expanded ? "▾" : "▸") + '</button>' : (opts.subtasks ? '<span class="mine-caret-sp"></span>' : '')) +
       '<span class="wsjf-pill ' + wsjfPillClass(wsjf) + '">' + wsjf.toFixed(1) + '</span>' +
-      '<span class="mine-row-title">' + escapeHtml(t.Title || "") + '</span>' +
+      '<span class="mine-row-title">' + scheduleChip(t) + escapeHtml(t.Title || "") + '</span>' +
       (wsName && wsName !== "—" ? '<span class="mine-ws" title="' + escapeAttr(wsName) + '">' + escapeHtml(wsName) + '</span>' : "") +
-      ownerHtml +
       statusChip(t.Status) +
       (dIso ? '<span class="mine-due' + (isOverdue ? " overdue" : "") + '">📅 ' + escapeHtml(formatDateShort(t.DueDate)) + '</span>' : "") +
       (subs.length ? '<span class="mine-sub">✓ ' + subDone + '/' + subs.length + '</span>' : "") +
       '<span class="mine-pct">' + pct + '%</span>';
-    row.addEventListener("click", () => openEditModal(Number(t.TaskID)));
-    return row;
+    row.addEventListener("click", (e) => { if (e.target.closest(".mine-caret")) return; openEditModal(Number(t.TaskID)); });
+    const caret = row.querySelector(".mine-caret");
+    if (caret) caret.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const id = Number(t.TaskID);
+      if (State.expandedSubtasks.has(id)) State.expandedSubtasks.delete(id); else State.expandedSubtasks.add(id);
+      renderMyDashboard();
+    });
+    wrap.appendChild(row);
+    if (canExpand && expanded) wrap.appendChild(buildSubtaskAccordion(Number(t.TaskID)));
+    return wrap;
   }
 
   // ───── Workstreams view ─────
@@ -1580,7 +1707,7 @@
         b.innerHTML = escapeHtml(workstreamName(id)) + ' <span class="rc-n">' + wsRisk[id] + '</span>';
         b.addEventListener("click", () => {
           State.filters.workstream = id; State.filters.quarter = q;
-          State.viewMode = "list"; syncFilterControls(); render();
+          State.viewMode = "board"; syncFilterControls(); render();
         });
         chips.appendChild(b);
       });
@@ -1692,8 +1819,8 @@
     const drillTo = (quarter) => {
       State.filters.workstream = wsId;
       State.filters.quarter = quarter || "";
-      State.viewMode = "list";
-      syncFilterControls();   // reflect the drill-down in the filter chips + popover
+      State.viewMode = "board";   // drill into the board (with filters), not the list
+      syncFilterControls();       // reflect the drill-down in the filter chips + popover
       render();
     };
     card.querySelector(".ws-view-tasks").addEventListener("click", () => drillTo(""));

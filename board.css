@@ -926,6 +926,45 @@ html, body {
 .mu-on { color: #999; font-weight: 600; }
 .mu-text { font-size: 13px; color: #444; margin: 2px 0; }
 .mu-meta { font-size: 11px; color: #999; }
+
+/* ── My Tasks (redesigned) ── */
+.mine-header { flex-wrap: wrap; }
+.mine-ctx { font-size: 12px; font-weight: 700; color: #555; background: #eef0f3; border-radius: 999px; padding: 4px 12px; }
+.mine-ctx b { color: #222; }
+.mine-ctx-soon.on { background: #fff4e5; color: #a6601a; }
+.mine-ctx-alert { background: #fdecee; color: #CA001B; }
+.mine-stats .mine-stat { text-align: left; }
+.mine-stat.bstat-blocked .ms-value, .mine-stat.bstat-blocked { }
+.mine-2col { display: grid; grid-template-columns: 1fr 320px; gap: 20px; align-items: start; max-width: 1200px; }
+.mine-col-main, .mine-col-side { min-width: 0; }
+.mine-col-side .mine-section { position: sticky; top: 8px; }
+
+/* owned-workstream cards, horizontal scroll */
+.mine-ws-scroll { display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 8px; }
+.mine-wscard { flex: 0 0 300px; background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.08); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.mine-wscard-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mine-wscard-name { font-weight: 800; font-size: 14px; color: #1a1a1a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mine-wscard-view { flex: 0 0 auto; }
+.mine-wscard-meta { font-size: 12px; color: #666; }
+.mine-wscard-meta .danger { color: #CA001B; font-weight: 700; }
+.mine-wscard-ups { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid #f1f1f3; padding-top: 6px; }
+.mine-wscard-ups.muted { font-size: 11px; font-style: italic; }
+.mine-wscard-ups .mine-update { border-left: none; padding: 4px 0; box-shadow: none; background: none; }
+
+/* activity rail + update lines */
+.mine-activity .mine-update { border-left: 3px solid #c8102e; }
+.mu-kind { font-size: 9px; text-transform: uppercase; letter-spacing: .04em; font-weight: 800; color: #6366f1; background: #eef2ff; border-radius: 4px; padding: 1px 5px; margin-right: 4px; }
+.mu-kind-task { color: #0b7285; background: #e3fafc; }
+.mu-on { font-size: 11px; color: #999; margin: 1px 0; }
+
+/* my subtasks + expandable priorities */
+.mine-rowwrap { margin-bottom: 6px; }
+.mine-caret { border: none; background: none; cursor: pointer; color: #999; font-size: 11px; padding: 0 4px; flex: 0 0 auto; }
+.mine-caret-sp { width: 16px; flex: 0 0 auto; }
+.mine-subrow { display: flex; align-items: center; gap: 10px; background: #fff; border-radius: 8px; padding: 8px 12px; margin-bottom: 6px; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+.mine-subrow .mine-sub-cb { flex: 0 0 auto; cursor: pointer; }
+.mine-sub-text { flex: 1; font-weight: 600; color: #222; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mine-sub-text:hover { color: #CA001B; }
 .mine-setup { max-width: 420px; margin: 64px auto; text-align: center; }
 .mine-setup h2 { margin: 0 0 8px; }
 .mine-setup p { margin: 0 0 16px; }

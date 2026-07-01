@@ -141,3 +141,5 @@ The first column holds the status names (these are your Kanban columns). Two **o
 | `Status` (first col) | the status name, e.g. `Backlog`, `Planned/Ready`, `In Progress`, `Blocked`, `Done` |
 | `Order` 🆕 | number — left→right board-column order. With this column, reordering in the app saves here (otherwise order is per-device only) |
 | `Color` 🆕 | hex colour (e.g. `#6366f1`) — the **one** colour used for that status everywhere (board, list, roadmap bars, workstream mix) |
+| `Bucket` 🆕 | `ready` / `active` / `blocked` / `done` — categorises the status so the app **adapts to renamed statuses**. Drives the My-Tasks stat tiles + the "complete"/"blocked" behaviour (auto-100%, at-risk, etc.). If blank, inferred from the name |
+| `Priority` 🆕 | `Yes`/`No` — does this status feed the **My Priorities** list (default: the `active` bucket) |
