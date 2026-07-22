@@ -1615,6 +1615,47 @@
     const d = isoDate(t.DueDate);
     return d && d < new Date().toISOString().slice(0, 10);
   }
+  function clampPct(v) {
+    const n = Number(v);
+    if (isNaN(n)) return 0;
+    return Math.max(0, Math.min(100, Math.round(n)));
+  }
+  function taskProgress(t) {
+    return isCompleteStatus(t.Status) ? 100 : clampPct(t.PercentComplete);
+  }
+  function avgTaskProgress(tasks) {
+    tasks = tasks || [];
+    return tasks.length ? Math.round(tasks.reduce((s, t) => s + taskProgress(t), 0) / tasks.length) : 0;
+  }
+  function quarterElapsedPct(q) {
+    const dleft = daysLeftInQuarter(q);
+    if (dleft == null) return null;
+    const qDays = { Q1: 90, Q2: 91, Q3: 92, Q4: 92 }[q] || 91;
+    return Math.max(0, Math.min(100, Math.round(((qDays - dleft) / qDays) * 100)));
+  }
+  function expectedProgressForTask(t, fallbackElapsedPct) {
+    const s = isoDate(t.StartDate);
+    const e = isoDate(t.DueDate);
+    if (s && e) {
+      const start = new Date(s + "T00:00:00").getTime();
+      const end = new Date(e + "T00:00:00").getTime();
+      const today = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00").getTime();
+      if (!isNaN(start) && !isNaN(end) && end > start) {
+        if (today <= start) return 0;
+        if (today >= end) return 100;
+        return Math.round(((today - start) / (end - start)) * 100);
+      }
+    }
+    return fallbackElapsedPct == null ? null : fallbackElapsedPct;
+  }
+  function isBehindPace(t, fallbackElapsedPct) {
+    if (isCompleteStatus(t.Status)) return false;
+    const actual = taskProgress(t);
+    const expected = expectedProgressForTask(t, fallbackElapsedPct);
+    // Avoid turning legitimate in-progress work into red noise; only call out
+    // items with very low progress that are materially behind their expected pace.
+    return expected != null && expected >= 30 && actual < 40 && actual < expected - 35;
+  }
 
   function renderWorkstreams() {
     const root = document.getElementById("wsview");
@@ -1688,21 +1729,16 @@
     const qtasks = State.tasks.filter((t) => t.Quarter === q);
     const total = qtasks.length;
     const done = qtasks.filter((t) => isCompleteStatus(t.Status)).length;
-    const pct = total ? Math.round((done / total) * 100) : 0;
+    const pct = avgTaskProgress(qtasks);
     const open = qtasks.filter((t) => !isCompleteStatus(t.Status));
 
-    // Pace: how far through the quarter are we vs. how much is done?
+    // Pace is now compared against production progress, not only fully-closed cards.
     const dleft = daysLeftInQuarter(q);
-    const qDays = { Q1: 90, Q2: 91, Q3: 92, Q4: 92 }[q] || 91;
-    const elapsedPct = dleft == null ? null : Math.max(0, Math.min(100, Math.round(((qDays - dleft) / qDays) * 100)));
-    const behind = elapsedPct != null && total > 0 && pct < elapsedPct - 10;
+    const elapsedPct = quarterElapsedPct(q);
+    const behind = elapsedPct != null && total > 0 && pct < elapsedPct - 15;
 
-    // At risk = blocked / off-track / overdue (isAtRisk) OR "behind pace": an open
-    // task whose % trails the quarter's elapsed % by >15 pts. This makes the list
-    // reflect the "behind pace" banner instead of staying empty until tasks go overdue.
-    const behindPace = (t) => !isCompleteStatus(t.Status) && elapsedPct != null &&
-      (Number(t.PercentComplete) || 0) < elapsedPct - 15;
-    const atRisk = qtasks.filter((t) => isAtRisk(t) || behindPace(t)).sort(byWsjfDesc);
+    // At risk = blocked / off-track / overdue, plus only materially stalled work.
+    const atRisk = qtasks.filter((t) => isAtRisk(t) || isBehindPace(t, elapsedPct)).sort(byWsjfDesc);
 
     // Per-workstream at-risk counts.
     const wsRisk = {};
@@ -1825,7 +1861,13 @@
     const blocked = tasks.filter((t) => isBlockedStatus(t.Status)).length;
     const todayIso = new Date().toISOString().slice(0, 10);
     const overdue = tasks.filter((t) => !isCompleteStatus(t.Status) && isoDate(t.DueDate) && isoDate(t.DueDate) < todayIso).length;
-    const pctDone = total ? Math.round((done / total) * 100) : 0;
+    const pctDone = avgTaskProgress(tasks);
+    const focusQ = State.wsQuarter || currentQuarter();
+    const focusTasks = tasks.filter((t) => t.Quarter === focusQ);
+    const focusDone = focusTasks.filter((t) => isCompleteStatus(t.Status)).length;
+    const focusPct = avgTaskProgress(focusTasks);
+    const focusElapsedPct = quarterElapsedPct(focusQ);
+    const focusRisk = focusTasks.filter((t) => isAtRisk(t) || isBehindPace(t, focusElapsedPct)).length;
     const avgWsjf = total ? (tasks.reduce((s, t) => s + (Number(t.WSJF) || 0), 0) / total) : 0;
     const cols = boardColumns();
     const counts = {};
@@ -1841,12 +1883,13 @@
     const qRowsHtml = quarters.map((q) => {
       const qt = tasks.filter((t) => t.Quarter === q);
       const qd = qt.filter((t) => isCompleteStatus(t.Status)).length;
-      const qOver = qt.filter((t) => !isCompleteStatus(t.Status) && isoDate(t.DueDate) && isoDate(t.DueDate) < todayIso).length;
-      const qpct = qt.length ? Math.round((qd / qt.length) * 100) : 0;
+      const qElapsed = quarterElapsedPct(q);
+      const qRisk = qt.filter((t) => isAtRisk(t) || isBehindPace(t, qElapsed)).length;
+      const qpct = avgTaskProgress(qt);
       return '<button class="ws-q-row" data-q="' + escapeAttr(q) + '" title="View ' + escapeAttr(q) + ' tasks">' +
-        '<span class="ws-q-name">' + escapeHtml(q) + (qOver ? ' <span class="ws-q-over">⚠' + qOver + '</span>' : '') + '</span>' +
+        '<span class="ws-q-name">' + escapeHtml(q) + (qRisk ? ' <span class="ws-q-over">⚠' + qRisk + '</span>' : '') + '</span>' +
         '<span class="ws-q-bar"><span class="ws-q-fill" style="width:' + qpct + '%"></span></span>' +
-        '<span class="ws-q-num">' + qd + '/' + qt.length + '</span>' +
+        '<span class="ws-q-num">' + qpct + '% · ' + qd + '/' + qt.length + '</span>' +
         '</button>';
     }).join("");
 
@@ -1865,13 +1908,16 @@
       '<div class="ws-statbar" title="Status mix across this workstream’s tasks">' +
         cols.map((s) => counts[s] ? '<span class="ws-seg" style="flex:' + counts[s] + ';background:' + statusColor(s) + '" title="' + escapeAttr(s + ": " + counts[s]) + '"></span>' : '').join('') +
       '</div>' +
-      '<div class="ws-progress-label"><b>' + done + ' / ' + total + '</b> done · ' + pctDone + '% · avg ' + avgPct + '% complete</div>' +
+      '<div class="ws-progress-label"><b>' + pctDone + '%</b> avg complete · ' + done + ' / ' + total + ' fully done</div>' +
+      (focusTasks.length ? '<div class="ws-progress-label ws-focus-progress"><b>' + escapeHtml(focusQ) + ':</b> ' + focusPct + '% avg complete · ' + focusDone + '/' + focusTasks.length + ' done' + (focusRisk ? ' · <span class="danger">' + focusRisk + ' at risk</span>' : '') + '</div>' : '') +
       '<div class="ws-legend">' + cols.filter((s) => counts[s]).map((s) =>
         '<span class="ws-leg"><i style="background:' + statusColor(s) + '"></i>' + escapeHtml(s) + ' ' + counts[s] + '</span>').join('') + '</div>' +
       '<div class="ws-chips">' +
         '<span class="ws-chip">' + total + ' tasks</span>' +
         (blocked ? '<span class="ws-chip danger">' + blocked + ' blocked</span>' : '') +
         (overdue ? '<span class="ws-chip danger">' + overdue + ' overdue</span>' : '') +
+        (focusTasks.length ? '<span class="ws-chip">' + escapeHtml(focusQ) + ' ' + focusPct + '% avg</span>' : '') +
+        (focusRisk ? '<span class="ws-chip danger">' + focusRisk + ' ' + escapeHtml(focusQ) + ' at risk</span>' : '') +
         '<span class="ws-chip">WSJF ' + avgWsjf.toFixed(1) + ' avg</span>' +
       '</div>' +
       (qRowsHtml ? '<div class="ws-quarters"><div class="ws-sub-label">Progress by quarter</div>' + qRowsHtml + '</div>' : '') +
