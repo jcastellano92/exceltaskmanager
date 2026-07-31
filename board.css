@@ -1514,3 +1514,28 @@ html, body {
 
 .go-evidence { border: 0; cursor: pointer; text-align: left; }
 .go-evidence:hover { outline: 1px solid #CA001B; }
+
+
+/* Final goals phase: status-driven work groups and evidence artifacts */
+.go-link-group { margin-top: 12px; border: 1px solid #e5e7eb; border-left: 4px solid var(--group-color); border-radius: 9px; overflow: hidden; background: #fff; }
+.go-link-group > header { display: grid; grid-template-columns: 10px 1fr auto; gap: 8px; align-items: center; padding: 8px 10px; background: color-mix(in srgb, var(--group-color) 10%, white); }
+.go-link-group > header span { width: 8px; height: 8px; border-radius: 50%; background: var(--group-color); }
+.go-link-group > header strong { color: #333; }
+.go-link-group > header small { color: #777; }
+.go-link-group.complete { border-color: #bbdfc5; border-left-color: #16a34a; }
+.go-link { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: stretch; border-top: 1px solid #ededed; background: #fff; }
+.go-link-main { width: 100%; display: grid; grid-template-columns: minmax(0,1fr) 140px; gap: 10px; align-items: center; padding: 10px 12px; border: 0; border-left: 3px solid var(--task-color); background: transparent; text-align: left; cursor: pointer; }
+.go-link-main:hover { background: #fafafa; }
+.go-link.complete { background: #f4fbf6; }
+.go-link.complete .go-link-title { color: #146c2e; }
+.go-link.active .go-evidence { display: none; }
+.go-evidence { min-width: 120px; margin: 7px; padding: 7px 10px; align-self: center; }
+.ev-doc-section, .ev-new-doc { padding: 12px; border: 1px solid #e5e7eb; border-radius: 9px; }
+.ev-doc-section > small { display: block; color: #777; margin: 3px 0 8px; }
+.ev-doc { display: flex !important; flex-direction: row !important; align-items: flex-start; gap: 9px !important; padding: 8px 4px; border-top: 1px solid #eee; }
+.ev-doc input { width: auto !important; margin-top: 4px; }
+.ev-doc span { min-width: 0; }
+.ev-doc strong, .ev-doc small { display: block; overflow: hidden; text-overflow: ellipsis; }
+.ev-doc small { color: #888; font-weight: 400; }
+.ev-new-doc > div { display: grid; grid-template-columns: 1fr 2fr 130px; gap: 8px; margin-top: 8px; }
+@media (max-width: 700px) { .ev-new-doc > div { grid-template-columns: 1fr; } .go-link-main { grid-template-columns: 1fr; } }

@@ -37,6 +37,7 @@
     keyResults: [],
     keyResultLinks: [],
     archivedTasks: [],
+    allAttachments: [],
     expandedGoals: new Set(),
     expandedKeyResults: new Set(),
     workstreams: [],
@@ -122,7 +123,7 @@
       });
     }
     const methods = [
-      "getCurrentUser", "setCurrentUser", "readAllTasks", "readArchivedTasks", "readTaskById", "readKeyResults", "readTaskKeyResultLinks",
+      "getCurrentUser", "setCurrentUser", "readAllTasks", "readArchivedTasks", "readTaskById", "readKeyResults", "readTaskKeyResultLinks", "readAllAttachments",
       "writeTask", "writeTaskStatus", "createTask", "archiveTask",
       "readSubtasksForTask", "readAttachmentsForTask", "readActivityForTask",
       "readUpdatesForParent", "createUpdate",
@@ -240,6 +241,7 @@
     const keyResults  = await window.WsjfData.readKeyResults();
     const keyResultLinks = await window.WsjfData.readTaskKeyResultLinks();
     const archivedTasks = await window.WsjfData.readArchivedTasks();
+    const allAttachments = await window.WsjfData.readAllAttachments();
     const workstreams = await window.WsjfData._internal._readTable("WorkstreamsTable");
     State.config = {
       Owners: owners.filter(Boolean),
@@ -252,6 +254,7 @@
     State.keyResults = keyResults;
     State.keyResultLinks = keyResultLinks;
     State.archivedTasks = archivedTasks.filter((t) => String(t.TaskID == null ? "" : t.TaskID).trim() !== "");
+    State.allAttachments = allAttachments;
     State.workstreams = workstreams;
 
     // StatusesTable optional columns drive everything status-related so the app
@@ -520,13 +523,13 @@
     return bits.join(" · ");
   }
 
-  function linksForKeyResult(keyResultId) {
-    return State.keyResultLinks.filter((l) => String(l.KeyResultID) === String(keyResultId));
+  function linkedTask(link) {
+    if (String(link.ParentType) !== "Task") return null;
+    return State.tasks.find((t) => String(t.TaskID) === String(link.ParentID)) || null;
   }
 
-  function linkedTask(link) {
-    const source = String(link.ParentType) === "Subtask" ? [] : State.tasks.concat(State.archivedTasks);
-    return source.find((t) => String(t.TaskID) === String(link.ParentID)) || null;
+  function linksForKeyResult(keyResultId) {
+    return State.keyResultLinks.filter((l) => String(l.KeyResultID) === String(keyResultId) && linkedTask(l));
   }
 
   function renderGoalsDashboard() {
@@ -612,45 +615,101 @@
           <span>${links.length} linked work item${links.length === 1 ? "" : "s"}</span></div>
         ${kr.H2Focus ? `<div class="go-focus"><strong>H2 focus</strong>${escapeHtml(kr.H2Focus)}</div>` : ""}
         ${kr.RiskSummary ? `<div class="go-risk-detail"><strong>Risk</strong>${escapeHtml(kr.RiskSummary)}${kr.Mitigation ? `<br><strong>Mitigation</strong>${escapeHtml(kr.Mitigation)}` : ""}</div>` : ""}
-        <div class="go-linked-list">${links.length ? links.map(renderGoalLink).join("") : '<div class="go-empty">No linked work.</div>'}</div>
+        <div class="go-linked-list">${links.length ? renderGoalLinkGroups(links) : '<div class="go-empty">No active linked work.</div>'}</div>
       </div>` : ""}
     </section>`;
   }
 
+  function renderGoalLinkGroups(links) {
+    const groups = new Map();
+    links.forEach((link) => {
+      const task = linkedTask(link);
+      if (!task) return;
+      const key = String(task.Status || "Unspecified");
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(link);
+    });
+    return Array.from(groups.entries()).sort((a, b) => {
+      const ac = a[1].some((l) => isCompleteStatus(linkedTask(l).Status));
+      const bc = b[1].some((l) => isCompleteStatus(linkedTask(l).Status));
+      return ac === bc ? String(a[0]).localeCompare(String(b[0])) : (ac ? -1 : 1);
+    }).map(([status, rows]) => {
+      const complete = isCompleteStatus(status);
+      const color = complete ? "#16a34a" : statusColor(status);
+      return `<section class="go-link-group ${complete ? "complete" : "active"}" style="--group-color:${escapeAttr(color)}">
+        <header><span></span><strong>${escapeHtml(status)}</strong><small>${rows.length} work item${rows.length === 1 ? "" : "s"}</small></header>
+        ${rows.map(renderGoalLink).join("")}</section>`;
+    }).join("");
+  }
+
   function renderGoalLink(link) {
     const task = linkedTask(link);
-    const archived = task && String(task.Archived || "").toLowerCase() === "yes";
-    const status = task ? (task.Status || "") : "Missing";
-    const title = task ? task.Title : `${link.ParentType} ${link.ParentID}`;
-    return `<div class="go-link ${archived ? "historical" : ""}">
-      <button type="button" ${task && !archived ? `data-open-task="${escapeAttr(task.TaskID)}"` : "disabled"}>
-        <span class="go-link-title">${escapeHtml(title || "Untitled")}</span>
-        <span class="go-link-status"><small>Task status</small>${escapeHtml(archived ? "Historical evidence" : status)}</span>
-        <button class="go-evidence ev-${String(link.EvidenceStatus || "none").toLowerCase()}" data-evidence-link="${escapeAttr(link.LinkID)}" type="button"><small>Evidence</small>${escapeHtml(evidenceLabel(link.EvidenceStatus))}</button>
-      </button></div>`;
+    if (!task) return "";
+    const complete = isCompleteStatus(task.Status);
+    const color = complete ? "#16a34a" : statusColor(task.Status);
+    return `<div class="go-link ${complete ? "complete" : "active"}" style="--task-color:${escapeAttr(color)}">
+      <button class="go-link-main" type="button" data-open-task="${escapeAttr(task.TaskID)}">
+        <span class="go-link-title">${escapeHtml(task.Title || "Untitled")}</span>
+        <span class="go-link-status"><small>Task status</small>${escapeHtml(task.Status || "")}</span>
+      </button>
+      ${complete ? `<button class="go-evidence ev-${String(link.EvidenceStatus || "none").toLowerCase()}" data-evidence-link="${escapeAttr(link.LinkID)}" type="button"><small>Evidence</small>${escapeHtml(evidenceLabel(link.EvidenceStatus))}</button>` : ""}
+    </div>`;
   }
 
   function evidenceLabel(value) {
-    const v = String(value || "None");
-    return v === "Pending" ? "Awaiting Review" : v;
+    return String(value || "None");
   }
 
-  function openEvidenceEditor(link) {
+  function parseEvidenceNote(raw) {
+    const text = String(raw || "");
+    const match = text.match(/^\[\[ATTACHMENTS:([^\]]*)\]\]\n?/);
+    const ids = match && match[1] ? match[1].split(",").map((x) => x.trim()).filter(Boolean) : [];
+    return { ids: ids, description: match ? text.slice(match[0].length) : text };
+  }
+
+  function buildEvidenceNote(ids, description) {
+    const marker = ids.length ? `[[ATTACHMENTS:${ids.join(",")}]]\n` : "";
+    return marker + String(description || "");
+  }
+
+  async function openEvidenceEditor(link) {
     if (!link) return;
+    const task = linkedTask(link);
+    if (!task || !isCompleteStatus(task.Status)) return;
+    const parsed = parseEvidenceNote(link.EvidenceNote);
+    const taskAttachmentIds = State.allAttachments.filter((a) => String(a.ParentTaskID) === String(task.TaskID)).map((a) => String(a.AttachmentID));
+    const selected = new Set(parsed.ids.length ? parsed.ids : taskAttachmentIds);
+    const docs = State.allAttachments.slice().sort((a, b) => String(a.Label || a.Url).localeCompare(String(b.Label || b.Url)));
+    const docRows = docs.length ? docs.map((a) => `<label class="ev-doc"><input type="checkbox" data-ev-att value="${escapeAttr(a.AttachmentID)}" ${selected.has(String(a.AttachmentID)) ? "checked" : ""}><span><strong>${escapeHtml(a.Label || "Document")}</strong><small>${escapeHtml(a.Url || "")}</small></span></label>`).join("") : '<div class="go-empty">No document artifacts are available.</div>';
     const body = `<div class="go-edit-grid">
-      <label>Evidence status<select data-f="EvidenceStatus">${optionMarkup(["None","Pending","Submitted","Verified","Rejected"], link.EvidenceStatus || "None")}</select></label>
+      <label>Evidence status<select data-f="EvidenceStatus">${optionMarkup(["Submitted","Verified","Rejected"], link.EvidenceStatus || "Submitted")}</select></label>
       <label>Verified by<input data-f="VerifiedBy" value="${escapeAttr(link.VerifiedBy || "")}"></label>
-      <label class="wide">Evidence note<textarea data-f="EvidenceNote">${escapeHtml(link.EvidenceNote || "")}</textarea></label></div>`;
+      <label class="wide">Evidence description<textarea data-f="EvidenceDescription">${escapeHtml(parsed.description)}</textarea></label>
+      <div class="wide ev-doc-section"><strong>Linked document artifacts</strong><small>Select task documents or any existing document in the workbook.</small>${docRows}</div>
+      <div class="wide ev-new-doc"><strong>Add new evidence document link</strong><div><input data-new-label placeholder="Document label"><input data-new-url placeholder="SharePoint or document URL"><select data-new-type>${optionMarkup(State.config.Types || ["Link"], "Link")}</select></div></div></div>`;
     showStage2Editor("Review evidence", body, async (o) => {
       const fields = editorValues(o);
-      fields.UpdatedBy = State.me.name;
-      if (fields.EvidenceStatus === "Verified") {
-        fields.VerifiedBy = fields.VerifiedBy || State.me.name;
-        fields.VerifiedDate = new Date().toISOString().slice(0, 10);
-      } else {
-        fields.VerifiedDate = "";
+      const ids = Array.from(o.querySelectorAll("[data-ev-att]:checked")).map((x) => x.value);
+      const label = o.querySelector("[data-new-label]").value.trim();
+      const url = o.querySelector("[data-new-url]").value.trim();
+      if (label || url) {
+        if (!label || !url) throw new Error("Both a document label and URL are required.");
+        const newId = await window.WsjfData.createAttachment({ ParentTaskID: task.TaskID, Label: label, Url: url, Type: o.querySelector("[data-new-type]").value || "Link" });
+        ids.push(String(newId));
       }
-      await window.WsjfData.updateTaskKeyResultLink(link.LinkID, fields);
+      const update = {
+        EvidenceStatus: fields.EvidenceStatus,
+        EvidenceNote: buildEvidenceNote(ids, fields.EvidenceDescription),
+        UpdatedBy: State.me.name
+      };
+      if (fields.EvidenceStatus === "Verified") {
+        update.VerifiedBy = fields.VerifiedBy || State.me.name;
+        update.VerifiedDate = new Date().toISOString().slice(0, 10);
+      } else {
+        update.VerifiedBy = fields.VerifiedBy || "";
+        update.VerifiedDate = "";
+      }
+      await window.WsjfData.updateTaskKeyResultLink(link.LinkID, update);
     });
   }
 
@@ -4729,6 +4788,8 @@
     if (rgEl) t.RoadmapGroup = rgEl.value.trim();
 
     if (!t.Title) { toast("Title is required.", "warn"); return; }
+    if (!currentTaskGoals().length) { toast("Select at least one objective before saving.", "warn"); return; }
+    if (!currentTaskKeyResults().length) { toast("Select at least one key result before saving.", "warn"); return; }
 
     // Status changed? maintain ColumnOrder accordingly
     if (t.Status !== newStatus) {
@@ -4810,12 +4871,7 @@
         toast("Task created.", "info");
       }
 
-      let newEvidenceStatus = "None";
-      if (isCompleteStatus(t.Status) && currentTaskKeyResults().length) {
-        const submit = await uiConfirm("This task is complete. Submit the selected links as evidence for review?", { okText: "Submit evidence", cancelText: "Not now" });
-        if (submit) newEvidenceStatus = "Submitted";
-      }
-      await window.WsjfData.syncTaskKeyResultLinks("Task", t.TaskID, currentTaskKeyResults(), State.me.name, newEvidenceStatus);
+      await window.WsjfData.syncTaskKeyResultLinks("Task", t.TaskID, currentTaskKeyResults(), State.me.name, isCompleteStatus(t.Status));
       modalDirty = false;
       await loadConfigAndDimensions();
       await reloadTasks();
@@ -4830,28 +4886,17 @@
   }
 
   async function archiveFromModal() {
-    if (!currentEditingTask || !currentEditingTask.TaskID) {
-      hideModal();
-      return;
-    }
-    if (!(await uiConfirm("Archive this task? It will be hidden from the board.", { okText: "Archive" }))) return;
+    if (!currentEditingTask || !currentEditingTask.TaskID) { hideModal(); return; }
+    if (!(await uiConfirm("Archive this task? It will be removed from goals and active views.", { okText: "Archive" }))) return;
     try {
       await window.WsjfData.archiveTask(currentEditingTask.TaskID);
       toast("Archived.", "info");
-      let newEvidenceStatus = "None";
-      if (isCompleteStatus(t.Status) && currentTaskKeyResults().length) {
-        const submit = await uiConfirm("This task is complete. Submit the selected links as evidence for review?", { okText: "Submit evidence", cancelText: "Not now" });
-        if (submit) newEvidenceStatus = "Submitted";
-      }
-      await window.WsjfData.syncTaskKeyResultLinks("Task", t.TaskID, currentTaskKeyResults(), State.me.name, newEvidenceStatus);
       modalDirty = false;
       await loadConfigAndDimensions();
       await reloadTasks();
       render();
       hideModal();
-    } catch (err) {
-      toast("Archive failed: " + err.message, "error");
-    }
+    } catch (err) { toast("Archive failed: " + err.message, "error"); }
   }
 
   function maxColumnOrderForStatus(status) {

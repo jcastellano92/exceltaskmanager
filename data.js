@@ -151,6 +151,12 @@
       String(r.KeyResultID == null ? "" : r.KeyResultID).trim() !== "" &&
       String(r.ParentID == null ? "" : r.ParentID).trim() !== "");
   }
+
+  async function readAllAttachments() {
+    const all = await _readTable(ATT_TABLE);
+    return all.filter((r) => String(r.AttachmentID == null ? "" : r.AttachmentID).trim() !== "" &&
+      String(r.ParentTaskID == null ? "" : r.ParentTaskID).trim() !== "");
+  }
   async function readTaskById(taskId) {
     const all = await _readTable(TASKS_TABLE);
     return all.find((t) => Number(t.TaskID) === Number(taskId)) || null;
@@ -342,6 +348,8 @@
         : 90;
     }
     await _updateRowMulti(TASKS_TABLE, rowIndex, updates);
+    try { await _setTaskEvidenceForCompletion(taskId, _isComplete(newStatus), me.name); }
+    catch (e) { console.warn("Evidence status sync failed (non-fatal):", e); }
     // ...and closes out all its subtasks with a completion date (best-effort:
     // a subtask hiccup must not undo the status change the user just made).
     if (_isComplete(newStatus)) {
@@ -402,6 +410,9 @@
       LastUpdated: ts,
       UpdatedBy: me.name
     });
+    const links = await _readTable(KR_LINK_TABLE);
+    const taskLinks = links.filter((r) => String(r.ParentType) === "Task" && String(r.ParentID) === String(taskId));
+    for (const link of taskLinks.slice().sort((a, b) => b._rowIndex - a._rowIndex)) await _deleteRow(KR_LINK_TABLE, link._rowIndex);
     await logActivity("Task", taskId, "Archived", "Archived", "No", "Yes", "");
     return ts;
   }
@@ -797,7 +808,21 @@
     await updateKeyResult(id, { Archived: "Yes" });
   }
 
-  async function syncTaskKeyResultLinks(parentType, parentId, keyResultIds, addedBy, newEvidenceStatus) {
+  async function _setTaskEvidenceForCompletion(taskId, complete, updatedBy) {
+    const rows = await _readTable(KR_LINK_TABLE);
+    const links = rows.filter((r) => String(r.ParentType) === "Task" && String(r.ParentID) === String(taskId));
+    for (const link of links) {
+      const current = String(link.EvidenceStatus || "None");
+      let next = current;
+      if (complete && current !== "Verified" && current !== "Rejected") next = "Submitted";
+      if (!complete && (current === "Pending" || current === "Submitted")) next = "None";
+      if (next !== current) await _updateRowMulti(KR_LINK_TABLE, link._rowIndex, {
+        EvidenceStatus: next, LastUpdated: _nowIso(), UpdatedBy: updatedBy || ""
+      });
+    }
+  }
+
+  async function syncTaskKeyResultLinks(parentType, parentId, keyResultIds, addedBy, taskComplete) {
     const type = parentType || "Task";
     const pid = String(parentId);
     const wanted = new Set((keyResultIds || []).map(String));
@@ -812,10 +837,11 @@
       await _appendObjByHeaders(KR_LINK_TABLE, {
         LinkID: linkId, ParentType: type, ParentID: parentId, KeyResultID: krid,
         ContributionType: "Direct", ContributionWeight: "", ContributionValue: "",
-        EvidenceStatus: newEvidenceStatus || "None", EvidenceNote: "", VerifiedBy: "",
+        EvidenceStatus: taskComplete ? "Submitted" : "None", EvidenceNote: "", VerifiedBy: "",
         VerifiedDate: "", LastUpdated: _nowIso(), UpdatedBy: addedBy || ""
       });
     }
+    if (type === "Task") await _setTaskEvidenceForCompletion(parentId, !!taskComplete, addedBy);
   }
 
   async function updateTaskKeyResultLink(linkId, fields) {
@@ -861,7 +887,7 @@
     // user
     getCurrentUser, setCurrentUser,
     // tasks
-    readAllTasks, readArchivedTasks, readTaskById, readKeyResults, readTaskKeyResultLinks,
+    readAllTasks, readArchivedTasks, readTaskById, readKeyResults, readTaskKeyResultLinks, readAllAttachments,
     writeTask, writeTaskStatus, createTask, archiveTask,
     // children
     readSubtasksForTask, readAttachmentsForTask, readActivityForTask,
