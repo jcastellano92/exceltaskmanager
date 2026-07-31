@@ -1585,3 +1585,34 @@ html, body {
 /* Keep group and task roadmap boxes aligned to the shared three-line maximum. */
 .rm-bar, .rm-groupbar { height:50px; min-height:50px; max-height:50px; box-sizing:border-box; }
 .rm-trow { min-height:60px; }
+
+
+/* 2026-07-31 readability, roadmap drill-down, approvals, and interaction pass */
+.go-edit-grid input, .go-edit-grid textarea { font-weight: 450; color:#25282d; }
+.go-edit-grid select { font-weight: 600; color:#25282d; }
+.go-edit-grid label { font-weight:650; }
+.go-edit-section { display:flex; flex-direction:column; gap:4px; margin-top:4px; padding:11px 13px; border:1px solid #e5e7eb; border-left:4px solid #ca001b; border-radius:8px; background:#fffafb; }
+.go-edit-section strong { color:#2f3338; }
+.go-edit-section span { color:#737982; font-size:11px; font-weight:450; line-height:1.4; }
+.go-action-summary { display:grid; grid-template-columns:auto 1fr; gap:2px 7px; align-items:center; border:1px solid rgba(255,255,255,.45); border-radius:10px; padding:7px 10px; background:rgba(255,255,255,.13); color:#fff; cursor:pointer; }
+.go-action-summary strong { grid-row:1 / span 2; font-size:20px; }
+.go-action-summary span { font-size:10px; font-weight:750; }
+.go-action-summary.needed { background:#fff; color:#a70018; box-shadow:0 3px 10px rgba(0,0,0,.14); }
+.go-approval-badge { display:inline-flex; margin-left:8px; padding:2px 7px; border-radius:10px; background:#fff0c7; color:#8a5500; font-size:9px; font-style:normal; font-weight:800; vertical-align:middle; }
+/* Roadmap bars must grow for wrapped text instead of inheriting legacy fixed heights. */
+.rm-trow { min-height:54px !important; height:auto !important; }
+.rm-bar, .rm-groupbar { min-height:44px !important; height:auto !important; max-height:64px !important; box-sizing:border-box; padding:7px 5px !important; align-items:flex-start !important; overflow:hidden; }
+.rm-bar-label { min-width:0; flex:1 1 auto; white-space:normal !important; overflow:hidden !important; text-overflow:ellipsis; display:-webkit-box !important; -webkit-box-orient:vertical; -webkit-line-clamp:3; line-height:1.25 !important; max-height:3.75em !important; padding-top:1px !important; overflow-wrap:anywhere; }
+.rm-bar-caret { display:inline-flex !important; align-items:center; justify-content:center; flex:0 0 28px; width:28px; height:28px; margin:-1px 5px 0 2px; padding:0 !important; border:1px solid rgba(255,255,255,.75) !important; border-radius:7px; background:rgba(255,255,255,.18) !important; color:#fff !important; font-size:22px !important; line-height:1 !important; opacity:1 !important; visibility:visible !important; cursor:pointer; z-index:8; }
+.rm-bar-caret:hover { background:rgba(255,255,255,.32) !important; transform:scale(1.06); }
+.rm-subgroup { margin:2px 8px 7px !important; padding:4px 0 !important; background:#f8fafc; border:1px solid #e1e6ec; border-left:3px solid #bac4d0; border-radius:7px; }
+.rm-subgroup .rm-subrow { height:30px !important; min-height:30px !important; margin:0 !important; }
+.rm-subbar2 { top:3px !important; min-height:24px !important; height:24px !important; max-height:24px !important; padding:4px 8px !important; line-height:16px !important; white-space:nowrap !important; display:block !important; overflow:hidden !important; text-overflow:ellipsis !important; cursor:help; }
+.rm-subbar2:hover { filter:brightness(.98); box-shadow:0 2px 7px rgba(15,23,42,.16); z-index:5; }
+.rm-wslane { align-items:start; }
+.rm-wslabel { position:sticky; top:0; align-self:start; }
+/* One consistent edit affordance across dashboard surfaces. */
+[data-edit-goal], [data-edit-kr], .ws-edit-btn, .ms-edit, .edit-btn { cursor:pointer; }
+[data-edit-goal]::before, [data-edit-kr]::before { content:"Edit"; }
+[data-edit-goal], [data-edit-kr] { font-size:0; }
+[data-edit-goal]::before, [data-edit-kr]::before { font-size:11px; font-weight:750; }

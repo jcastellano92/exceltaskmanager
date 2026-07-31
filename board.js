@@ -3,7 +3,7 @@
   "use strict";
 
   const COLUMNS = ["Backlog", "In Progress", "On Track", "Blocked", "Done"];   // default if StatusesTable is empty
-  const POLL_MS = 30000;
+  const POLL_MS = 10000;
 
   // Board columns are driven by the StatusesTable (editable in Config), with an
   // optional per-user column order remembered in localStorage. Falls back to the
@@ -539,12 +539,13 @@
     const goals = State.goals.slice().sort((a, b) => (Number(a.Order) || 999) - (Number(b.Order) || 999));
     const watchKeyResults = State.keyResults.filter((kr) => keyResultAttention(kr) === "watch");
     const atRiskKeyResults = State.keyResults.filter((kr) => keyResultAttention(kr) === "risk");
+    const approvalLinks = State.keyResultLinks.filter((link) => linkedTask(link) && ["Submitted", "Pending", "Rejected"].includes(String(link.EvidenceStatus || "")));
     host.innerHTML = `
       <section class="go-hero">
         <div><div class="go-eyebrow">2026 goals & objectives</div><h1>Team progress check-in</h1>
         <p>Manage objectives, key results, evidence, and linked work.</p>
         <button class="btn go-add-btn" data-add-goal type="button">+ Add objective</button></div>
-        <div class="go-summary"><strong>${goals.length}</strong><span>objectives</span><strong>${State.keyResults.length}</strong><span>key results</span></div>
+        <div class="go-summary"><strong>${goals.length}</strong><span>objectives</span><strong>${State.keyResults.length}</strong><span>key results</span><button class="go-action-summary ${approvalLinks.length ? "needed" : "clear"}" type="button" data-approval-summary><strong>${approvalLinks.length}</strong><span>approval action${approvalLinks.length === 1 ? "" : "s"}</span></button></div>
       </section>
       <div class="go-layout">
         <section class="go-objectives">${goals.map(renderGoalRow).join("")}</section>
@@ -560,6 +561,8 @@
         </aside>
       </div>`;
 
+    const approvalSummary = host.querySelector("[data-approval-summary]");
+    if (approvalSummary && approvalLinks.length) approvalSummary.addEventListener("click", () => focusKeyResultFromAttention(approvalLinks[0].KeyResultID));
     const addGoal = host.querySelector("[data-add-goal]");
     if (addGoal) addGoal.addEventListener("click", () => openGoalEditor(null));
     host.querySelectorAll("[data-edit-goal]").forEach((btn) => btn.addEventListener("click", (e) => {
@@ -615,10 +618,11 @@
     const id = String(kr.KeyResultID);
     const pct = keyResultProgress(kr);
     const links = linksForKeyResult(id);
+    const approvalCount = links.filter((link) => ["Submitted", "Pending", "Rejected"].includes(String(link.EvidenceStatus || ""))).length;
     const open = State.expandedKeyResults.has(id);
     return `<section class="go-kr ${open ? "expanded" : ""}" id="kr-${escapeAttr(id)}">
       <div class="go-kr-header"><button class="go-kr-head" data-kr-toggle="${escapeAttr(id)}" type="button">
-        <span class="go-kr-id">${escapeHtml(id)}</span><span class="go-kr-name">${escapeHtml(kr.KeyResultName || id)}</span>
+        <span class="go-kr-id">${escapeHtml(id)}</span><span class="go-kr-name">${escapeHtml(kr.KeyResultName || id)}${approvalCount ? `<em class="go-approval-badge">${approvalCount} action${approvalCount === 1 ? "" : "s"}</em>` : ""}</span>
         <span class="go-basis">${escapeHtml(kr.CalculationMode || "Manual")}</span>
         <span class="go-kr-pct">${Math.round(pct)}%</span><span>${open ? "−" : "+"}</span>
       </button><button class="go-edit-kr" data-edit-kr="${escapeAttr(id)}" type="button">Edit</button></div>
@@ -812,7 +816,8 @@
       <label>Weight <span class="field-help" title="Weight controls this item’s share of the parent weighted average. A weight of 2 counts twice as much as a weight of 1.">ⓘ</span><input data-f="Weight" type="number" step="0.01" value="${escapeAttr(k.Weight || 1)}"></label>
       <label>Quarter<select data-f="Quarter">${optionMarkup(State.config.Quarters, k.Quarter || "Yearly")}</select></label>
       <label>Owner<select data-f="Owner"><option value=""></option>${optionMarkup(State.config.Owners, k.Owner)}</select></label>
-      <label>Health<select data-f="Health">${optionMarkup(["Green","Amber","Red","Not Started"], k.Health || "Not Started")}</select></label>
+      <div class="wide go-edit-section"><strong>Attention and review</strong><span>Watch and At risk place this key result in the Goals attention panel. Submitted evidence creates an approval action.</span></div>
+      <label>Attention status<select data-f="Health">${keyResultHealthOptions(k.Health || "Not Started")}</select></label>
       <label class="wide">Risk<textarea data-f="RiskSummary">${escapeHtml(k.RiskSummary || "")}</textarea></label>
       <label class="wide">Mitigation<textarea data-f="Mitigation">${escapeHtml(k.Mitigation || "")}</textarea></label>
       <label class="wide">Next focus<textarea data-f="H2Focus">${escapeHtml(k.H2Focus || "")}</textarea></label></div>`;
@@ -830,6 +835,15 @@
     const out = {};
     overlay.querySelectorAll("[data-f]").forEach((el) => { out[el.dataset.f] = el.value; });
     return out;
+  }
+
+  function keyResultHealthOptions(selected) {
+    return [
+      { value: "Green", label: "On track" },
+      { value: "Amber", label: "Watch" },
+      { value: "Red", label: "At risk" },
+      { value: "Not Started", label: "Not started" }
+    ].map((row) => `<option value="${row.value}" ${String(row.value) === String(selected) ? "selected" : ""}>${row.label}</option>`).join("");
   }
 
   function keyResultAttention(kr) {
@@ -2659,7 +2673,7 @@
           const sw = Math.max(8, sr - left);
           const stip = escapeAttr((s.Text || "Subtask") + (due ? " · due " + formatDateShort(due) : "") + (done2 ? " · done" : ""));
           return '<div class="rm-trow rm-subrow">' +
-            '<div class="rm-subbar2' + (done2 ? " done" : "") + '" style="left:' + left + '%;width:' + sw + '%" title="' + stip + '">' +
+            '<div class="rm-subbar2' + (done2 ? " done" : "") + '" style="left:' + left + '%;width:' + sw + '%" data-rm-sub="' + escapeAttr(s.SubtaskID || "") + '" data-parent-task="' + escapeAttr(t.TaskID) + '" title="' + stip + '">' +
               (done2 ? "✓ " : "↳ ") + escapeHtml(s.Text || "Subtask") +
               (due ? '<span class="rm-subbar2-due">' + escapeHtml(formatDateShort(due)) + '</span>' : '') +
             '</div></div>';
@@ -2718,6 +2732,25 @@
         '<button class="btn btn-secondary btn-sm" id="rm-sel-clear">Clear</button></div>';
     }
     root.innerHTML = html;
+
+    Array.from(root.querySelectorAll("[data-rm-sub]")).forEach((el) => {
+      el.addEventListener("mouseenter", () => {
+        const task = State.tasks.find((t) => String(t.TaskID) === String(el.dataset.parentTask));
+        const sub = task && (State.subtasksByParent[task.TaskID] || []).find((s) => String(s.SubtaskID) === String(el.dataset.rmSub));
+        const card = document.getElementById("rm-hovercard");
+        if (!sub || !card) return;
+        card.innerHTML = `<div class="rm-hc-title">${escapeHtml(sub.Text || "Subtask")}</div>
+          <div class="rm-hc-row"><span>Parent</span><b>${escapeHtml(task.Title || "")}</b></div>
+          <div class="rm-hc-row"><span>Owner</span><b>${escapeHtml(sub.Owner || "—")}</b></div>
+          <div class="rm-hc-row"><span>Due</span><b>${escapeHtml(sub.DueDate ? formatDateShort(sub.DueDate) : "Parent due date")}</b></div>
+          <div class="rm-hc-row"><span>Status</span><b>${String(sub.Done).toLowerCase() === "yes" ? "Complete" : "Open"}</b></div>`;
+        const r = el.getBoundingClientRect();
+        card.style.top = Math.min(r.bottom + 8, window.innerHeight - 190) + "px";
+        card.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 270)) + "px";
+        card.hidden = false;
+      });
+      el.addEventListener("mouseleave", () => { const card = document.getElementById("rm-hovercard"); if (card) card.hidden = true; });
+    });
 
     // Group tabs.
     Array.from(root.querySelectorAll(".rm-tab[data-rm-group]")).forEach((b) => {
@@ -3780,6 +3813,22 @@
         const fresh = await window.WsjfData.readAllTasks();
         diffAndAnimate(State.tasks, fresh);
         State.tasks = fresh;
+        pollCount++;
+        // Goals, links, workstreams and attachments change less often than tasks.
+        // Refresh them every third task poll so team edits appear without turning
+        // every 10-second sync into a full workbook reload.
+        if (pollCount % 3 === 0) {
+          const goals = await window.WsjfData._internal._readTable("GoalsTable");
+          const keyResults = await window.WsjfData.readKeyResults();
+          const keyResultLinks = await window.WsjfData.readTaskKeyResultLinks();
+          const workstreams = await window.WsjfData._internal._readTable("WorkstreamsTable");
+          const allAttachments = await window.WsjfData.readAllAttachments();
+          State.goals = goals.filter((g) => String(g.Archived || "No").toLowerCase() !== "yes");
+          State.keyResults = keyResults;
+          State.keyResultLinks = keyResultLinks;
+          State.workstreams = workstreams;
+          State.allAttachments = allAttachments;
+        }
         State.lastSyncTs = Date.now();
         updateSyncLabel();
         refreshTagFilterMenu();
@@ -3833,6 +3882,7 @@
   let currentEditingTask = null; // working copy
   let originalTaskSnapshot = null;
   let currentSubtasks = [];
+  let originalSubtasksById = new Map();
   let currentAttachments = [];
   let currentTagList = []; // for autocomplete
   let modalDirty = false;
@@ -3989,7 +4039,8 @@
 
       currentEditingTask = Object.assign({}, t, { _loadedLastUpdated: t.LastUpdated });
       originalTaskSnapshot = Object.assign({}, t);
-      currentSubtasks = subs.slice();
+      currentSubtasks = subs.map((s) => Object.assign({}, s));
+      originalSubtasksById = new Map(subs.filter((s) => s.SubtaskID).map((s) => [String(s.SubtaskID), Object.assign({}, s)]));
       currentAttachments = atts.slice();
       currentTagList = collectAllTags();
       modalDirty = false;
@@ -4059,6 +4110,7 @@
     };
     originalTaskSnapshot = Object.assign({}, currentEditingTask);
     currentSubtasks = [];
+    originalSubtasksById = new Map();
     currentAttachments = [];
     currentTagList = collectAllTags();
     modalDirty = true; // new task — needs save
@@ -4454,9 +4506,11 @@
               ParentTaskID: parentId, Text: newText, Done: doneState ? "Yes" : "No",
               Order: currentSubtasks.length + 1, DueDate: newDue, Owner: newOwner
             });
-            currentSubtasks.push({ SubtaskID: id, ParentTaskID: parentId, Text: newText,
+            const created = { SubtaskID: id, ParentTaskID: parentId, Text: newText,
               Done: doneState ? "Yes" : "No", Order: currentSubtasks.length + 1, DueDate: newDue, Owner: newOwner,
-              CompletedDate: doneState ? new Date().toISOString().slice(0, 10) : "" });
+              CompletedDate: doneState ? new Date().toISOString().slice(0, 10) : "" };
+            currentSubtasks.push(created);
+            originalSubtasksById.set(String(id), Object.assign({}, created));
           } else {
             // Unsaved task — keep in memory; flushed when the task is saved.
             currentSubtasks.push({ SubtaskID: null, Text: newText, Done: doneState ? "Yes" : "No",
@@ -4468,6 +4522,7 @@
             await window.WsjfData.writeSubtask({ SubtaskID: s.SubtaskID, Text: newText, Owner: newOwner, DueDate: newDue });
           }
           s.Text = newText; s.Owner = newOwner; s.DueDate = newDue; s.Done = doneState ? "Yes" : "No";
+          if (s.SubtaskID) originalSubtasksById.set(String(s.SubtaskID), Object.assign({}, s));
           if (doneState && !s.CompletedDate) s.CompletedDate = new Date().toISOString().slice(0, 10);
           if (!doneState) s.CompletedDate = "";
         }
@@ -4874,12 +4929,19 @@
           if (err && err.code === "CONFLICT") {
             const who = err.serverRow && err.serverRow.UpdatedBy || "someone";
             const when = relTime(err.serverRow && err.serverRow.LastUpdated);
-            const choice = await uiConfirm(`Card was updated by ${who} ${when}.\nOverwrite their changes, or keep theirs?`, { okText: "Overwrite", cancelText: "Keep theirs" });
-            if (!choice) {
-              toast("Save cancelled — refresh to see latest.", "info");
-              saveBtn.disabled = false; saveBtn.textContent = "Save";
-              return;
+            const server = err.serverRow || {};
+            const meaningfulFields = ["Title", "Description", "Owner", "Contributors", "WorkstreamID", "GoalID", "Quarter", "Status", "Health", "StartDate", "DueDate", "Tags", "BlockedByTaskIDs", "RoadmapGroup", "UserBusinessValue", "TimeCriticality", "RiskReduction", "JobSize"];
+            const externalChange = meaningfulFields.some((field) => originalTaskSnapshot && String(server[field] == null ? "" : server[field]) !== String(originalTaskSnapshot[field] == null ? "" : originalTaskSnapshot[field]));
+            if (externalChange) {
+              const choice = await uiConfirm(`Card was updated by ${who} ${when}.\nOverwrite their changes, or keep theirs?`, { okText: "Overwrite", cancelText: "Keep theirs" });
+              if (!choice) {
+                toast("Save cancelled — refresh to see latest.", "info");
+                saveBtn.disabled = false; saveBtn.textContent = "Save";
+                return;
+              }
             }
+            // Derived writes such as subtask progress only advance LastUpdated.
+            // Rebase those silently instead of asking users to overwrite themselves.
             await window.WsjfData.writeTask(t, { force: true });
           } else {
             throw err;
@@ -4894,10 +4956,13 @@
           const wasDone = String(s.Done).toLowerCase() === "yes";
           const done = taskDone ? "Yes" : (s.Done || "No");
           if (s.SubtaskID) {
-            const payload = { SubtaskID: s.SubtaskID, Text: s.Text || "", Done: done, Order: s.Order || 1, DueDate: s.DueDate || "", Owner: s.Owner || "" };
-            // only stamp a completion date on the transition — don't clobber an existing one
-            if (taskDone && !wasDone) payload.CompletedDate = doneToday;
-            await window.WsjfData.writeSubtask(payload);
+            const baseline = originalSubtasksById.get(String(s.SubtaskID));
+            const changed = !baseline || ["Text", "Done", "Order", "DueDate", "Owner"].some((field) => String(s[field] == null ? "" : s[field]) !== String(baseline[field] == null ? "" : baseline[field]));
+            if (changed || (taskDone && !wasDone)) {
+              const payload = { SubtaskID: s.SubtaskID, Text: s.Text || "", Done: done, Order: s.Order || 1, DueDate: s.DueDate || "", Owner: s.Owner || "" };
+              if (taskDone && !wasDone) payload.CompletedDate = doneToday;
+              await window.WsjfData.writeSubtask(payload);
+            }
           } else if (s.Text) {
             await window.WsjfData.createSubtask({ ParentTaskID: t.TaskID, Text: s.Text, Done: done, Order: s.Order || 1, DueDate: s.DueDate || "", Owner: s.Owner || "" });
           }
@@ -4929,10 +4994,10 @@
 
       await window.WsjfData.syncTaskKeyResultLinks("Task", t.TaskID, currentTaskKeyResults(), State.me.name, isCompleteStatus(t.Status));
       modalDirty = false;
-      await loadConfigAndDimensions();
+      State.keyResultLinks = await window.WsjfData.readTaskKeyResultLinks();
       await reloadTasks();
-      render();
       hideModal();
+      render();
     } catch (err) {
       console.error(err);
       toast("Save failed: " + err.message, "error");
