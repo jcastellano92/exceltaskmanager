@@ -336,7 +336,8 @@
         cap[r.Person] = {
           availability: r.Availability === "" || r.Availability == null ? 1 : Number(r.Availability),
           byQuarter: { Q1: numOrNull(r.AvailQ1), Q2: numOrNull(r.AvailQ2), Q3: numOrNull(r.AvailQ3), Q4: numOrNull(r.AvailQ4) },
-          baseline: numOrNull(r.BaselineOverride)
+          baseline: numOrNull(r.BaselineOverride),
+          adjustment: { Q1: numOrNull(r.OverrideQ1) || 0, Q2: numOrNull(r.OverrideQ2) || 0, Q3: numOrNull(r.OverrideQ3) || 0, Q4: numOrNull(r.OverrideQ4) || 0 }
         };
       });
       State.capacity = cap;
@@ -536,8 +537,8 @@
     const host = document.getElementById("goalsview");
     if (!host) return;
     const goals = State.goals.slice().sort((a, b) => (Number(a.Order) || 999) - (Number(b.Order) || 999));
-    const watchGoals = goals.filter((g) => objectiveAttention(g) === "watch");
-    const atRiskGoals = goals.filter((g) => objectiveAttention(g) === "risk");
+    const watchKeyResults = State.keyResults.filter((kr) => keyResultAttention(kr) === "watch");
+    const atRiskKeyResults = State.keyResults.filter((kr) => keyResultAttention(kr) === "risk");
     host.innerHTML = `
       <section class="go-hero">
         <div><div class="go-eyebrow">2026 goals & objectives</div><h1>Team progress check-in</h1>
@@ -549,12 +550,12 @@
         <section class="go-objectives">${goals.map(renderGoalRow).join("")}</section>
         <aside class="go-risk-panel">
           <section class="go-attention-section watch">
-            <div class="go-attention-heading"><span></span><div><strong>Watch</strong><small>${watchGoals.length} objective${watchGoals.length === 1 ? "" : "s"}</small></div></div>
-            ${watchGoals.length ? watchGoals.map((g) => renderObjectiveAttentionItem(g, "watch")).join("") : '<div class="go-empty">No objectives on watch.</div>'}
+            <div class="go-attention-heading"><span></span><div><strong>Watch</strong><small>${watchKeyResults.length} key result${watchKeyResults.length === 1 ? "" : "s"}</small></div></div>
+            ${watchKeyResults.length ? watchKeyResults.map((kr) => renderKeyResultAttentionItem(kr, "watch")).join("") : '<div class="go-empty">No key results on watch.</div>'}
           </section>
           <section class="go-attention-section risk">
-            <div class="go-attention-heading"><span></span><div><strong>At risk</strong><small>${atRiskGoals.length} objective${atRiskGoals.length === 1 ? "" : "s"}</small></div></div>
-            ${atRiskGoals.length ? atRiskGoals.map((g) => renderObjectiveAttentionItem(g, "risk")).join("") : '<div class="go-empty">No objectives at risk.</div>'}
+            <div class="go-attention-heading"><span></span><div><strong>At risk</strong><small>${atRiskKeyResults.length} key result${atRiskKeyResults.length === 1 ? "" : "s"}</small></div></div>
+            ${atRiskKeyResults.length ? atRiskKeyResults.map((kr) => renderKeyResultAttentionItem(kr, "risk")).join("") : '<div class="go-empty">No key results at risk.</div>'}
           </section>
         </aside>
       </div>`;
@@ -570,7 +571,7 @@
     host.querySelectorAll("[data-edit-kr]").forEach((btn) => btn.addEventListener("click", (e) => {
       e.stopPropagation(); openKeyResultEditor(State.keyResults.find((kr) => String(kr.KeyResultID) === btn.dataset.editKr));
     }));
-    host.querySelectorAll("[data-attention-goal]").forEach((btn) => btn.addEventListener("click", () => focusObjectiveFromAttention(btn.dataset.attentionGoal)));
+    host.querySelectorAll("[data-attention-kr]").forEach((btn) => btn.addEventListener("click", () => focusKeyResultFromAttention(btn.dataset.attentionKr)));
     host.querySelectorAll("[data-goal-toggle]").forEach((btn) => btn.addEventListener("click", () => {
       const id = btn.dataset.goalToggle;
       State.expandedGoals.has(id) ? State.expandedGoals.delete(id) : State.expandedGoals.add(id);
@@ -592,7 +593,7 @@
     const pct = goalProgress(gid);
     const rows = State.keyResults.filter((kr) => String(kr.GoalID) === gid);
     const open = State.expandedGoals.has(gid);
-    const attention = objectiveAttention(goal);
+    const attention = "";
     return `<article class="go-objective ${open ? "expanded" : ""} ${attention ? "attention-" + attention : ""}" id="goal-${escapeAttr(gid)}" data-goal-card="${escapeAttr(gid)}">
       <div class="go-objective-header">
         <button class="go-objective-main" data-goal-toggle="${escapeAttr(gid)}" type="button">
@@ -689,16 +690,29 @@
     if (!link) return;
     const task = linkedTask(link);
     if (!task || !isCompleteStatus(task.Status)) return;
+    const kr = State.keyResults.find((item) => String(item.KeyResultID) === String(link.KeyResultID));
     const parsed = parseEvidenceNote(link.EvidenceNote);
     const taskAttachmentIds = State.allAttachments.filter((a) => String(a.ParentTaskID) === String(task.TaskID)).map((a) => String(a.AttachmentID));
-    const selected = new Set(parsed.ids.length ? parsed.ids : taskAttachmentIds);
+    const selected = new Set(taskAttachmentIds.concat(parsed.ids));
     const docs = State.allAttachments.slice().sort((a, b) => String(a.Label || a.Url).localeCompare(String(b.Label || b.Url)));
-    const docRows = docs.length ? docs.map((a) => `<label class="ev-doc"><input type="checkbox" data-ev-att value="${escapeAttr(a.AttachmentID)}" ${selected.has(String(a.AttachmentID)) ? "checked" : ""}><span><strong>${escapeHtml(a.Label || "Document")}</strong><small>${escapeHtml(a.Url || "")}</small></span></label>`).join("") : '<div class="go-empty">No document artifacts are available.</div>';
+    const docRows = docs.length ? docs.map((a) => {
+      const parent = State.tasks.find((t) => String(t.TaskID) === String(a.ParentTaskID));
+      const ws = parent ? workstreamName(parent.WorkstreamID) : "";
+      const context = parent ? `Task: ${parent.Title}${ws ? " · Workstream: " + ws : ""}` : "Unattached document";
+      return `<label class="ev-doc ${taskAttachmentIds.includes(String(a.AttachmentID)) ? "task-doc" : ""}"><input type="checkbox" data-ev-att value="${escapeAttr(a.AttachmentID)}" ${selected.has(String(a.AttachmentID)) ? "checked" : ""}><span><strong>${escapeHtml(a.Label || "Document")}</strong><small>${escapeHtml(context)}</small><small>${escapeHtml(a.Url || "")}</small></span></label>`;
+    }).join("") : '<div class="go-empty">No document artifacts are available.</div>';
+    const owners = Array.from(new Set([State.me.name].concat(State.config.Owners || []).filter(Boolean)));
+    const verifier = link.VerifiedBy || State.me.name || "";
+    const pct = kr ? Math.round(Number(kr.ManualPercent || 0) * 100) : 0;
     const body = `<div class="go-edit-grid">
       <label>Evidence status<select data-f="EvidenceStatus">${optionMarkup(["Submitted","Verified","Rejected"], link.EvidenceStatus || "Submitted")}</select></label>
-      <label>Verified by<input data-f="VerifiedBy" value="${escapeAttr(link.VerifiedBy || "")}"></label>
+      <label>Verified by<select data-f="VerifiedBy"><option value=""></option>${optionMarkup(owners, verifier)}</select></label>
+      <label>Key result progress %<input data-f="ManualPercent" type="number" min="0" max="100" value="${pct}"></label>
       <label class="wide">Evidence description<textarea data-f="EvidenceDescription">${escapeHtml(parsed.description)}</textarea></label>
-      <div class="wide ev-doc-section"><strong>Linked document artifacts</strong><small>Select task documents or any existing document in the workbook.</small>${docRows}</div>
+      <div class="wide ev-doc-section"><strong>Task documents</strong><small>Files already attached to this task are selected automatically.</small>${docs.filter((a) => taskAttachmentIds.includes(String(a.AttachmentID))).length ? docs.filter((a) => taskAttachmentIds.includes(String(a.AttachmentID))).map((a) => docRowsForSingle(a, selected, taskAttachmentIds)).join("") : '<div class="go-empty">No files are attached to this task.</div>'}
+        <button class="btn-link ev-add-more" type="button" data-more-evidence>+ Add additional evidence</button>
+        <div data-all-evidence hidden>${docRows}</div>
+      </div>
       <div class="wide ev-new-doc"><strong>Add new evidence document link</strong><div><input data-new-label placeholder="Document label"><input data-new-url placeholder="SharePoint or document URL"><select data-new-type>${optionMarkup(State.config.Types || ["Link"], "Link")}</select></div></div></div>`;
     showStage2Editor("Review evidence", body, async (o) => {
       const fields = editorValues(o);
@@ -710,20 +724,23 @@
         const newId = await window.WsjfData.createAttachment({ ParentTaskID: task.TaskID, Label: label, Url: url, Type: o.querySelector("[data-new-type]").value || "Link" });
         ids.push(String(newId));
       }
-      const update = {
-        EvidenceStatus: fields.EvidenceStatus,
-        EvidenceNote: buildEvidenceNote(ids, fields.EvidenceDescription),
-        UpdatedBy: State.me.name
-      };
+      if (kr) await window.WsjfData.updateKeyResult(kr.KeyResultID, { ManualPercent: Math.max(0, Math.min(100, Number(fields.ManualPercent) || 0)) / 100, UpdatedBy: State.me.name });
+      const update = { EvidenceStatus: fields.EvidenceStatus, EvidenceNote: buildEvidenceNote(Array.from(new Set(ids)), fields.EvidenceDescription), UpdatedBy: State.me.name };
       if (fields.EvidenceStatus === "Verified") {
         update.VerifiedBy = fields.VerifiedBy || State.me.name;
         update.VerifiedDate = new Date().toISOString().slice(0, 10);
-      } else {
-        update.VerifiedBy = fields.VerifiedBy || "";
-        update.VerifiedDate = "";
-      }
+      } else { update.VerifiedBy = fields.VerifiedBy || ""; update.VerifiedDate = ""; }
       await window.WsjfData.updateTaskKeyResultLink(link.LinkID, update);
     });
+    const overlay = document.getElementById("go-edit-overlay");
+    const more = overlay && overlay.querySelector("[data-more-evidence]");
+    if (more) more.addEventListener("click", () => { const all = overlay.querySelector("[data-all-evidence]"); all.hidden = !all.hidden; more.textContent = all.hidden ? "+ Add additional evidence" : "− Hide additional evidence"; });
+  }
+
+  function docRowsForSingle(a, selected, taskAttachmentIds) {
+    const parent = State.tasks.find((t) => String(t.TaskID) === String(a.ParentTaskID));
+    const ws = parent ? workstreamName(parent.WorkstreamID) : "";
+    return `<label class="ev-doc task-doc"><input type="checkbox" data-ev-att value="${escapeAttr(a.AttachmentID)}" ${selected.has(String(a.AttachmentID)) ? "checked" : ""}><span><strong>${escapeHtml(a.Label || "Document")}</strong><small>${escapeHtml(parent ? `Task: ${parent.Title}${ws ? " · Workstream: " + ws : ""}` : "")}</small><small>${escapeHtml(a.Url || "")}</small></span></label>`;
   }
 
   function optionMarkup(values, selected) {
@@ -766,10 +783,9 @@
       <label>Short name<input data-f="ShortName" value="${escapeAttr(g.ShortName || "")}"></label>
       <label class="wide">Description<textarea data-f="Description">${escapeHtml(g.Description || "")}</textarea></label>
       <label>Order<input data-f="Order" type="number" value="${escapeAttr(g.Order || State.goals.length + 1)}"></label>
-      <label>Weight<input data-f="Weight" type="number" step="0.01" value="${escapeAttr(g.Weight || 1)}"></label>
+      <label>Weight <span class="field-help" title="Weight controls this item’s share of the parent weighted average. A weight of 2 counts twice as much as a weight of 1.">ⓘ</span><input data-f="Weight" type="number" step="0.01" value="${escapeAttr(g.Weight || 1)}"></label>
       <label>Owner<select data-f="Owner"><option value=""></option>${optionMarkup(State.config.Owners, g.Owner)}</select></label>
-      <label>Attention flag<select data-f="Health" data-goal-attention>${objectiveAttentionOptions(g.Health || "Not Started")}</select></label>
-      <div class="wide go-attention-help" data-attention-help hidden><strong>Flagged objective</strong><span>Use the key result Risk and Mitigation fields below this objective for the detailed explanation shown in the attention panel.</span></div>
+      <label>Health<select data-f="Health">${optionMarkup(["Green","Amber","Red","Not Started"], g.Health || "Not Started")}</select></label>
       <label class="wide">Delivered / done<textarea data-f="SummaryDone">${escapeHtml(g.SummaryDone || "")}</textarea></label>
       <label class="wide">Next focus<textarea data-f="SummaryFocus">${escapeHtml(g.SummaryFocus || "")}</textarea></label></div>`;
     showStage2Editor(goal ? "Edit objective" : "Add objective", body, async (o) => {
@@ -793,7 +809,7 @@
       <label>Target value<input data-f="TargetValue" type="number" step="any" value="${escapeAttr(k.TargetValue == null ? "" : k.TargetValue)}"></label>
       <label>Current value<input data-f="CurrentValue" type="number" step="any" value="${escapeAttr(k.CurrentValue == null ? "" : k.CurrentValue)}"></label>
       <label>Progress %<input data-f="ManualPercent" type="number" min="0" max="100" value="${escapeAttr(Math.round(Number(k.ManualPercent || 0)*100))}"></label>
-      <label>Weight<input data-f="Weight" type="number" step="0.01" value="${escapeAttr(k.Weight || 1)}"></label>
+      <label>Weight <span class="field-help" title="Weight controls this item’s share of the parent weighted average. A weight of 2 counts twice as much as a weight of 1.">ⓘ</span><input data-f="Weight" type="number" step="0.01" value="${escapeAttr(k.Weight || 1)}"></label>
       <label>Quarter<select data-f="Quarter">${optionMarkup(State.config.Quarters, k.Quarter || "Yearly")}</select></label>
       <label>Owner<select data-f="Owner"><option value=""></option>${optionMarkup(State.config.Owners, k.Owner)}</select></label>
       <label>Health<select data-f="Health">${optionMarkup(["Green","Amber","Red","Not Started"], k.Health || "Not Started")}</select></label>
@@ -816,53 +832,39 @@
     return out;
   }
 
-  function objectiveAttention(goal) {
-    const health = String(goal && goal.Health || "").toLowerCase();
+  function keyResultAttention(kr) {
+    const health = String(kr && kr.Health || "").toLowerCase();
     return health === "amber" ? "watch" : health === "red" ? "risk" : "";
   }
 
-  function objectiveAttentionOptions(selected) {
-    return [
-      { value: "Green", label: "Normal" },
-      { value: "Amber", label: "Watch" },
-      { value: "Red", label: "At risk" },
-      { value: "Not Started", label: "Not started" }
-    ].map((row) => `<option value="${row.value}" ${String(row.value) === String(selected) ? "selected" : ""}>${row.label}</option>`).join("");
+  function activeLinksForKeyResult(keyResultId) {
+    return State.keyResultLinks.filter((link) => String(link.KeyResultID) === String(keyResultId) && linkedTask(link));
   }
 
-  function objectiveRiskKeyResults(goalId) {
-    return State.keyResults.filter((kr) => String(kr.GoalID) === String(goalId) &&
-      (String(kr.RiskSummary || "").trim() || String(kr.Mitigation || "").trim()));
-  }
-
-  function objectiveActiveLinkCount(goalId) {
-    const ids = new Set(State.keyResults.filter((kr) => String(kr.GoalID) === String(goalId)).map((kr) => String(kr.KeyResultID)));
-    return State.keyResultLinks.filter((link) => ids.has(String(link.KeyResultID)) && linkedTask(link)).length;
-  }
-
-  function renderObjectiveAttentionItem(goal, kind) {
-    const details = objectiveRiskKeyResults(goal.GoalID);
-    const taskCount = objectiveActiveLinkCount(goal.GoalID);
-    const summary = details.length
-      ? details.map((kr) => kr.RiskSummary || kr.Mitigation).filter(Boolean).slice(0, 2).join(" ")
-      : (goal.SummaryFocus || "Open the objective to review key results and linked work.");
-    return `<button class="go-attention-item ${kind}" type="button" data-attention-goal="${escapeAttr(goal.GoalID)}">
-      <span class="go-attention-item-top"><b>${escapeHtml(goal.ShortName || goal.GoalName || goal.GoalID)}</b><em>${escapeHtml(goal.GoalID)}</em></span>
+  function renderKeyResultAttentionItem(kr, kind) {
+    const goal = State.goals.find((g) => String(g.GoalID) === String(kr.GoalID));
+    const links = activeLinksForKeyResult(kr.KeyResultID);
+    const summary = kr.RiskSummary || kr.Mitigation || "Open the key result to review linked work and progress.";
+    return `<button class="go-attention-item ${kind}" type="button" data-attention-kr="${escapeAttr(kr.KeyResultID)}">
+      <span class="go-attention-item-top"><b>${escapeHtml(kr.KeyResultName || kr.KeyResultID)}</b><em>${escapeHtml(kr.KeyResultID)}</em></span>
+      <span class="go-attention-objective">${escapeHtml(goal ? (goal.ShortName || goal.GoalName || goal.GoalID) : kr.GoalID)}</span>
       <span class="go-attention-summary">${escapeHtml(summary)}</span>
-      <span class="go-attention-meta">${details.length} detailed risk item${details.length === 1 ? "" : "s"} · ${taskCount} linked work item${taskCount === 1 ? "" : "s"}</span>
-      <span class="go-attention-open">Open objective →</span>
+      ${kr.Mitigation ? `<span class="go-attention-mitigation"><strong>Mitigation:</strong> ${escapeHtml(kr.Mitigation)}</span>` : ""}
+      <span class="go-attention-meta">${links.length} linked work item${links.length === 1 ? "" : "s"}</span>
+      <span class="go-attention-open">Open key result →</span>
     </button>`;
   }
 
-  function focusObjectiveFromAttention(goalId) {
-    const gid = String(goalId);
-    State.expandedGoals.add(gid);
-    objectiveRiskKeyResults(gid).forEach((kr) => State.expandedKeyResults.add(String(kr.KeyResultID)));
+  function focusKeyResultFromAttention(keyResultId) {
+    const kr = State.keyResults.find((item) => String(item.KeyResultID) === String(keyResultId));
+    if (!kr) return;
+    State.expandedGoals.add(String(kr.GoalID));
+    State.expandedKeyResults.add(String(kr.KeyResultID));
     renderGoalsDashboard();
     requestAnimationFrame(() => {
-      const target = document.getElementById("goal-" + gid);
+      const target = document.getElementById("kr-" + kr.KeyResultID);
       if (!target) return;
-      target.scrollIntoView({ behavior: "smooth", block: "start" });
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
       target.classList.add("go-attention-focus");
       setTimeout(() => target.classList.remove("go-attention-focus"), 1800);
     });
@@ -2626,7 +2628,7 @@
       const subs = State.subtasksByParent[t.TaskID] || [];
       const expanded = State.roadmap.expanded.has(Number(t.TaskID));
       const caret = subs.length
-        ? '<span class="rm-bar-caret" data-rm-exp="' + t.TaskID + '" title="Show subtasks">' + (expanded ? "▾" : "▸") + '</span>'
+        ? '<button class="rm-bar-caret" data-rm-exp="' + t.TaskID + '" type="button" title="' + (expanded ? "Hide subtasks" : "Show subtasks") + '">' + (expanded ? "⌄" : "›") + '</button>'
         : '';
       return '<div class="rm-bar' + hl + blocked + seld + '" style="left:' + left + '%;width:' + width + '%;background:' + col + '" data-task-id="' + t.TaskID + '" title="' + escapeAttr(t.Title + " · " + (t.Status || "") + " · Ctrl+click to multi-select") + '">' +
         '<span class="rm-handle rm-handle-l" data-grip="l"></span>' +
@@ -2639,7 +2641,7 @@
     // A roadmap group is collapsed into one bar (min start → max end); click to focus.
     const groupBarEl = (g) => {
       const left = pctOf(g.s), width = Math.max(2.5, pctOf(g.e) - left);
-      return '<div class="rm-bar rm-groupbar" style="left:' + left + '%;width:' + width + '%" data-rg-group="' + escapeAttr(g.name) + '" data-rg-wid="' + escapeAttr(g.wid) + '" title="' + escapeAttr("Group: " + g.name + " (" + g.tasks.length + " items) — click to open & edit") + '">' +
+      return '<div class="rm-bar rm-groupbar" style="left:' + left + '%;width:' + width + '%" data-rg-group="' + escapeAttr(g.name) + '" data-rg-wid="' + escapeAttr(g.wid) + '" title="' + escapeAttr("Group: " + g.name + " · " + g.tasks.length + " items · " + g.tasks.map((t) => t.Title).slice(0, 5).join("; ") + " — click to open") + '">' +
         '<span class="rm-groupbar-icon">▦</span>' +
         '<span class="rm-bar-label">' + escapeHtml(g.name) + ' (' + g.tasks.length + ')</span>' +
         '<span class="rm-groupbar-open">⤢</span></div>';
@@ -2688,10 +2690,12 @@
       items.sort((a, b) => (a.s < b.s ? -1 : a.s > b.s ? 1 : 0));
       const packed = packItems(items);
 
-      const expandedInLane = ungrouped.filter((t) => State.roadmap.expanded.has(Number(t.TaskID)) && (State.subtasksByParent[t.TaskID] || []).length);
-      const rowsHtml =
-        packed.map((rowItems) => '<div class="rm-trow">' + rowItems.map((it) => it.kind === "group" ? groupBarEl(it) : barEl(it.t)).join("") + '</div>').join("") +
-        expandedInLane.map(subtaskRowsHtml).join("");
+      const rowsHtml = packed.map((rowItems) => {
+        const row = '<div class="rm-trow">' + rowItems.map((it) => it.kind === "group" ? groupBarEl(it) : barEl(it.t)).join("") + '</div>';
+        const children = rowItems.filter((it) => it.kind === "task" && State.roadmap.expanded.has(Number(it.t.TaskID)))
+          .map((it) => '<div class="rm-subgroup" style="--parent-left:' + pctOf(rng(it.t).s) + '%">' + subtaskRowsHtml(it.t) + '</div>').join("");
+        return row + children;
+      }).join("");
       html += '<div class="rm-wslane">' +
         '<div class="rm-wslabel" title="' + escapeAttr(workstreamName(wid)) + '">' +
           '<span class="rm-wsname">' + escapeHtml(workstreamName(wid) || "No workstream") + '</span>' +
@@ -4186,7 +4190,7 @@
     } else {
       const ratio = projected / cap;
       const pctTxt = Math.round(ratio * 100) + "%";
-      cls = ratio > 1 ? "cap-over" : ratio > 0.85 ? "cap-warn" : "cap-ok";
+      cls = ratio > 1 ? "cap-over" : ratio >= 0.85 ? "cap-warn" : "cap-ok";
       text = (ratio > 1 ? "⚠ " : "") + who + " " + pctTxt + " · " + quarter + " (" + projected + "/" + cap + " pts)" + (ratio > 1 ? " OVER" : "");
     }
     el.hidden = false;
@@ -5234,9 +5238,12 @@
       ? c.byQuarter[quarter] : c.availability;
     return (a == null || isNaN(a)) ? 1 : a;
   }
-  // Effective capacity = baseline × availability(quarter).
+  // Capacity follows the workbook model: baseline throughput × availability,
+  // plus the quarter-specific point adjustment, floored at zero.
   function personCapacity(person, quarter) {
-    return Math.round(personBaseline(person) * personAvailability(person, quarter));
+    const c = State.capacity[person] || {};
+    const adjustment = quarter && c.adjustment ? (Number(c.adjustment[quarter]) || 0) : 0;
+    return Math.max(0, Math.round((personBaseline(person) * personAvailability(person, quarter) + adjustment) * 10) / 10);
   }
   // Committed points for a person in a quarter (optionally excluding one task).
   function plannedPoints(person, quarter, exceptTaskId) {

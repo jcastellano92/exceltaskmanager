@@ -1581,3 +1581,7 @@ html, body {
 .go-attention-help[hidden] { display: none; }
 .go-attention-help span { font-weight: 400; line-height: 1.4; }
 @media (max-width: 860px) { .go-objective-header { grid-template-columns: 1fr; } .go-edit-objective { margin: 0 16px 14px 72px; min-height: 34px; } }
+
+/* Keep group and task roadmap boxes aligned to the shared three-line maximum. */
+.rm-bar, .rm-groupbar { height:50px; min-height:50px; max-height:50px; box-sizing:border-box; }
+.rm-trow { min-height:60px; }
