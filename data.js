@@ -21,6 +21,8 @@
   const LOG_TABLE   = "ActivityLogTable";
   const UPD_TABLE   = "UpdatesTable";
   const MS_TABLE    = "MilestonesTable";
+  const KR_TABLE    = "KeyResultsTable";
+  const KR_LINK_TABLE = "TaskKeyResultLinksTable";
   const CFG_SHEET   = "Config";
 
   // Which statuses mean "complete"? Set by the UI from StatusesTable's Bucket
@@ -134,6 +136,20 @@
   async function readArchivedTasks() {
     const all = await _readTable(TASKS_TABLE);
     return all.filter((t) => String(t.Archived || "").toLowerCase() === "yes");
+  }
+
+  // Goal progress is read through named tables so dashboard data follows the
+  // same workbook contract as tasks and workstreams.
+  async function readKeyResults() {
+    const all = await _readTable(KR_TABLE);
+    return all.filter((r) => String(r.KeyResultID == null ? "" : r.KeyResultID).trim() !== "" &&
+      String(r.Archived || "").toLowerCase() !== "yes");
+  }
+  async function readTaskKeyResultLinks() {
+    const all = await _readTable(KR_LINK_TABLE);
+    return all.filter((r) => String(r.LinkID == null ? "" : r.LinkID).trim() !== "" &&
+      String(r.KeyResultID == null ? "" : r.KeyResultID).trim() !== "" &&
+      String(r.ParentID == null ? "" : r.ParentID).trim() !== "");
   }
   async function readTaskById(taskId) {
     const all = await _readTable(TASKS_TABLE);
@@ -774,7 +790,7 @@
     // user
     getCurrentUser, setCurrentUser,
     // tasks
-    readAllTasks, readArchivedTasks, readTaskById,
+    readAllTasks, readArchivedTasks, readTaskById, readKeyResults, readTaskKeyResultLinks,
     writeTask, writeTaskStatus, createTask, archiveTask,
     // children
     readSubtasksForTask, readAttachmentsForTask, readActivityForTask,

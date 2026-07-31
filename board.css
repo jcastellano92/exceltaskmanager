@@ -1417,3 +1417,66 @@ html, body {
   .topbar { grid-template-columns: 1fr; gap: 8px; }
   .topbar-middle, .topbar-right { justify-content: flex-start; }
 }
+
+/* ───────── Goals & objectives dashboard ───────── */
+.goalsview { padding: 22px; background: #f5f5f5; min-height: calc(100vh - 58px); overflow: auto; }
+.go-hero { display: flex; justify-content: space-between; gap: 24px; align-items: flex-end; padding: 24px 28px; margin-bottom: 18px; color: #fff; background: linear-gradient(120deg, #8f0014, #CA001B 62%, #e0364f); border-radius: 14px; box-shadow: 0 10px 28px rgba(120,0,18,.18); }
+.go-hero h1 { margin: 3px 0 6px; font-size: 28px; }
+.go-hero p { margin: 0; color: rgba(255,255,255,.82); }
+.go-eyebrow { text-transform: uppercase; letter-spacing: .12em; font-size: 11px; font-weight: 800; opacity: .8; }
+.go-summary { display: grid; grid-template-columns: auto auto; gap: 1px 10px; align-items: baseline; min-width: 170px; }
+.go-summary strong { font-size: 25px; text-align: right; }
+.go-summary span { font-size: 12px; color: rgba(255,255,255,.8); }
+.go-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; align-items: start; }
+.go-objectives, .go-risk-panel { display: flex; flex-direction: column; gap: 12px; }
+.go-objective, .go-risk-panel { background: #fff; border: 1px solid #e5e5e5; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.05); overflow: hidden; }
+.go-objective-main { width: 100%; display: grid; grid-template-columns: 44px minmax(220px, 1fr) minmax(180px, 36%) 24px; gap: 14px; align-items: center; padding: 17px 18px 12px; border: 0; background: #fff; text-align: left; cursor: pointer; }
+.go-objective-main:hover { background: #fffafa; }
+.go-number { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; color: #fff; background: #CA001B; font-size: 17px; font-weight: 800; }
+.go-title-block { display: flex; flex-direction: column; gap: 3px; }
+.go-title-block strong { font-size: 16px; color: #222; }
+.go-title-block small { color: #777; line-height: 1.3; }
+.go-progress { display: grid; grid-template-columns: 1fr 46px; gap: 10px; align-items: center; }
+.go-progress > span { display: block; height: 12px; background: #eee; border-radius: 8px; overflow: hidden; }
+.go-progress i { display: block; height: 100%; background: linear-gradient(90deg, #9f0016, #CA001B); border-radius: 8px; }
+.go-progress b { color: #CA001B; font-size: 17px; text-align: right; }
+.go-chevron { color: #777; font-size: 18px; }
+.go-narrative { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 0 18px 16px 76px; }
+.go-narrative label, .go-section-title { display: block; color: #888; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+.go-narrative p { margin: 4px 0 0; color: #505050; line-height: 1.45; font-size: 12px; }
+.go-kr-list { border-top: 1px solid #eee; background: #fafafa; padding: 10px 14px 14px; }
+.go-kr { margin-top: 8px; background: #fff; border: 1px solid #e6e6e6; border-radius: 9px; overflow: hidden; }
+.go-kr-head { width: 100%; display: grid; grid-template-columns: 58px minmax(0, 1fr) 90px 54px 18px; gap: 10px; align-items: center; border: 0; background: #fff; padding: 12px; text-align: left; cursor: pointer; }
+.go-kr-head:hover { background: #fffafa; }
+.go-kr-id { color: #CA001B; font-weight: 800; font-size: 11px; }
+.go-kr-name { font-weight: 700; color: #333; }
+.go-basis { color: #777; font-size: 11px; }
+.go-kr-pct { color: #CA001B; font-weight: 800; text-align: right; }
+.go-kr-detail { padding: 4px 12px 12px 80px; border-top: 1px solid #f0f0f0; }
+.go-kr-detail > p { color: #555; line-height: 1.5; }
+.go-kr-meta { display: flex; flex-wrap: wrap; gap: 7px; margin: 8px 0 12px; }
+.go-kr-meta span { padding: 3px 8px; background: #f2f2f2; color: #666; border-radius: 12px; font-size: 11px; }
+.go-kr-meta .go-health-green { color: #146c2e; background: #e7f6eb; }
+.go-kr-meta .go-health-amber { color: #915c00; background: #fff3d4; }
+.go-kr-meta .go-health-red { color: #a11925; background: #fde7e9; }
+.go-focus, .go-risk-detail { margin: 8px 0; padding: 10px 12px; border-left: 3px solid #CA001B; background: #fff7f8; color: #555; line-height: 1.45; }
+.go-focus strong, .go-risk-detail strong { display: inline-block; margin-right: 7px; color: #333; }
+.go-linked-list { margin-top: 10px; display: grid; gap: 6px; }
+.go-link button { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 120px 84px; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid #e8e8e8; border-radius: 7px; background: #fff; text-align: left; cursor: pointer; }
+.go-link button:hover:not(:disabled) { border-color: #CA001B; background: #fffafa; }
+.go-link button:disabled { cursor: default; opacity: .78; }
+.go-link.historical button { background: #f5f5f5; }
+.go-link-title { font-weight: 650; color: #333; }
+.go-link-status { color: #777; font-size: 11px; }
+.go-evidence { justify-self: end; padding: 2px 7px; border-radius: 10px; font-size: 10px; font-weight: 700; background: #f2f2f2; color: #666; }
+.go-evidence.ev-pending { background: #fff3d4; color: #915c00; }
+.go-evidence.ev-verified { background: #e7f6eb; color: #146c2e; }
+.go-risk-panel { padding: 16px; position: sticky; top: 76px; }
+.go-risk-item { padding: 13px 0; border-bottom: 1px solid #eee; }
+.go-risk-item:last-child { border-bottom: 0; }
+.go-risk-item > div { display: flex; justify-content: space-between; gap: 8px; color: #888; font-size: 10px; text-transform: uppercase; }
+.go-risk-item strong { display: block; margin: 6px 0; color: #333; line-height: 1.35; }
+.go-risk-item p, .go-risk-item small { margin: 0; color: #666; line-height: 1.45; }
+.go-empty { color: #999; font-style: italic; padding: 12px; }
+@media (max-width: 1050px) { .go-layout { grid-template-columns: 1fr; } .go-risk-panel { position: static; } }
+@media (max-width: 760px) { .goalsview { padding: 10px; } .go-hero { align-items: flex-start; flex-direction: column; } .go-objective-main { grid-template-columns: 40px 1fr 24px; } .go-progress { grid-column: 2 / 3; } .go-narrative { grid-template-columns: 1fr; padding-left: 72px; } .go-kr-head { grid-template-columns: 54px 1fr 48px 16px; } .go-basis { display: none; } .go-kr-detail { padding-left: 12px; } }

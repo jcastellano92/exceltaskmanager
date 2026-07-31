@@ -11,7 +11,7 @@
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
   <!-- Self-hosted (a CDN reference here gets blocked on locked-down corporate networks, which silently kills drag-and-drop). -->
   <script src="sortable.min.js?v=20260701f"></script>
-  <link rel="stylesheet" href="board.css?v=20260701f" />
+  <link rel="stylesheet" href="board.css?v=20260731g" />
 
 <!--[if gte mso 9]><xml>
 <mso:CustomDocumentProperties>
@@ -32,6 +32,7 @@
       <button data-mode="board" class="active">Board</button>
       <button data-mode="ws">Workstreams</button>
       <button data-mode="roadmap">Roadmap</button>
+      <button data-mode="goals">Goals</button>
     </div>
   </div>
 
@@ -154,6 +155,11 @@
 <!-- ───────────── ROADMAP VIEW ───────────── -->
 <main class="roadmapview" id="roadmapview" hidden>
   <!-- timeline rendered dynamically -->
+</main>
+
+<!-- ───────────── GOALS & OBJECTIVES ───────────── -->
+<main class="goalsview" id="goalsview" hidden>
+  <!-- rendered dynamically -->
 </main>
 
 <!-- ───────────── MODAL ───────────── -->
@@ -322,7 +328,7 @@
 <!-- toasts -->
 <div id="toast-host" class="toast-host"></div>
 
-<script src="data.js?v=20260701f"></script>
-<script src="board.js?v=20260722"></script>
+<script src="data.js?v=20260731g"></script>
+<script src="board.js?v=20260731g"></script>
 </body>
 </html>

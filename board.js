@@ -34,6 +34,11 @@
     config: { Owners: [], Statuses: [], Quarters: [], Types: [], YesNo: [] },
     statusColors: {},                    // status name → colour (optional Color column on StatusesTable)
     goals: [],
+    keyResults: [],
+    keyResultLinks: [],
+    archivedTasks: [],
+    expandedGoals: new Set(),
+    expandedKeyResults: new Set(),
     workstreams: [],
     view: "all",                         // always show all tasks; narrow with the filters
     viewMode: "mine",                    // default landing = My Tasks. "board" | "list" | "mine" | "ws" | "config"
@@ -117,7 +122,7 @@
       });
     }
     const methods = [
-      "getCurrentUser", "setCurrentUser", "readAllTasks", "readArchivedTasks", "readTaskById",
+      "getCurrentUser", "setCurrentUser", "readAllTasks", "readArchivedTasks", "readTaskById", "readKeyResults", "readTaskKeyResultLinks",
       "writeTask", "writeTaskStatus", "createTask", "archiveTask",
       "readSubtasksForTask", "readAttachmentsForTask", "readActivityForTask",
       "readUpdatesForParent", "createUpdate",
@@ -196,6 +201,12 @@
       { name: "WorkstreamsTable", sample: State.workstreams[0],
         critical: ["WorkstreamID", "Name"], optional: ["Owner", "Status", "Goals", "Quarters", "Metric1"] },
       { name: "GoalsTable", sample: State.goals[0], critical: ["GoalID"], optional: ["ShortName", "GoalName"] },
+      { name: "KeyResultsTable", sample: State.keyResults[0],
+        critical: ["KeyResultID", "GoalID", "KeyResultName", "ManualPercent", "CalculationMode", "Weight", "Archived"],
+        optional: ["Description", "MetricType", "TargetValue", "CurrentValue", "Unit", "Health", "RiskSummary", "Mitigation", "H2Focus"] },
+      { name: "TaskKeyResultLinksTable", sample: State.keyResultLinks[0],
+        critical: ["LinkID", "ParentType", "ParentID", "KeyResultID", "ContributionType", "EvidenceStatus"],
+        optional: ["ContributionWeight", "ContributionValue", "EvidenceNote", "VerifiedBy", "VerifiedDate"] },
       { name: "SubtasksTable", sample: anySub && anySub[0],
         critical: ["SubtaskID", "ParentTaskID", "Text", "Done"], optional: ["Order", "DueDate", "CompletedDate", "Owner"] }
     ];
@@ -224,6 +235,9 @@
     const types       = await window.WsjfData.readConfigList("TypesTable");
     const yesNo       = await window.WsjfData.readConfigList("YesNoTable");
     const goals       = await window.WsjfData._internal._readTable("GoalsTable");
+    const keyResults  = await window.WsjfData.readKeyResults();
+    const keyResultLinks = await window.WsjfData.readTaskKeyResultLinks();
+    const archivedTasks = await window.WsjfData.readArchivedTasks();
     const workstreams = await window.WsjfData._internal._readTable("WorkstreamsTable");
     State.config = {
       Owners: owners.filter(Boolean),
@@ -232,7 +246,10 @@
       Types: types.filter(Boolean),
       YesNo: yesNo.filter(Boolean)
     };
-    State.goals = goals;
+    State.goals = goals.filter((g) => String(g.GoalID || "").trim() && String(g.Archived || "").toLowerCase() !== "yes");
+    State.keyResults = keyResults;
+    State.keyResultLinks = keyResultLinks;
+    State.archivedTasks = archivedTasks.filter((t) => String(t.TaskID == null ? "" : t.TaskID).trim() !== "");
     State.workstreams = workstreams;
 
     // StatusesTable optional columns drive everything status-related so the app
@@ -373,6 +390,7 @@
     const mineEl = document.getElementById("mineview");
     const wsEl = document.getElementById("wsview");
     const config = document.getElementById("configview");
+    const goalsEl = document.getElementById("goalsview");
     const mid = document.querySelector(".topbar-middle");
     const addBtn = document.getElementById("add-task-btn");
     const sortToggle = document.getElementById("sort-toggle");
@@ -391,6 +409,7 @@
     if (mineEl) mineEl.hidden = true;
     if (wsEl) wsEl.hidden = true;
     if (roadmapEl) roadmapEl.hidden = true;
+    if (goalsEl) goalsEl.hidden = true;
     if (config) config.hidden = true;
 
     if (State.viewMode === "config") {
@@ -416,6 +435,14 @@
       renderWorkstreams();
       return;
     }
+    if (State.viewMode === "goals") {
+      if (goalsEl) goalsEl.hidden = false;
+      if (mid) mid.hidden = true;
+      if (addBtn) addBtn.hidden = true;
+      if (sortToggle) sortToggle.hidden = true;
+      renderGoalsDashboard();
+      return;
+    }
 
     if (mid) mid.hidden = false;
     if (addBtn) addBtn.hidden = false;
@@ -438,6 +465,143 @@
     board.hidden = false;
     if (sortRow) sortRow.hidden = false;
     renderBoard();
+  }
+
+  function keyResultProgress(kr) {
+    const mode = String(kr.CalculationMode || "Manual");
+    if (mode === "Manual") return clampPercent(Number(kr.ManualPercent) * 100);
+    return clampPercent(Number(kr.ManualPercent) * 100);
+  }
+
+  function clampPercent(n) {
+    return isFinite(n) ? Math.max(0, Math.min(100, n)) : 0;
+  }
+
+  function goalProgress(goalId) {
+    const rows = State.keyResults.filter((kr) => String(kr.GoalID) === String(goalId));
+    if (!rows.length) return 0;
+    let weighted = 0, totalWeight = 0;
+    rows.forEach((kr) => {
+      const weight = Number(kr.Weight) > 0 ? Number(kr.Weight) : 1;
+      weighted += keyResultProgress(kr) * weight;
+      totalWeight += weight;
+    });
+    return totalWeight ? weighted / totalWeight : 0;
+  }
+
+  function goalHealthClass(value) {
+    const v = String(value || "Not Started").toLowerCase().replace(/\s+/g, "-");
+    return "go-health-" + v;
+  }
+
+  function metricSummary(kr) {
+    const bits = [];
+    if (kr.CurrentValue !== "" && kr.CurrentValue != null) bits.push("Current " + kr.CurrentValue);
+    if (kr.TargetValue !== "" && kr.TargetValue != null) bits.push("Target " + kr.TargetValue);
+    if (kr.Unit) bits.push(String(kr.Unit));
+    return bits.join(" · ");
+  }
+
+  function linksForKeyResult(keyResultId) {
+    return State.keyResultLinks.filter((l) => String(l.KeyResultID) === String(keyResultId));
+  }
+
+  function linkedTask(link) {
+    const source = String(link.ParentType) === "Subtask" ? [] : State.tasks.concat(State.archivedTasks);
+    return source.find((t) => String(t.TaskID) === String(link.ParentID)) || null;
+  }
+
+  function renderGoalsDashboard() {
+    const host = document.getElementById("goalsview");
+    if (!host) return;
+    const goals = State.goals.slice().sort((a, b) => (Number(a.Order) || 999) - (Number(b.Order) || 999));
+    const risks = State.keyResults.filter((kr) => String(kr.RiskSummary || "").trim());
+    host.innerHTML = `
+      <section class="go-hero">
+        <div><div class="go-eyebrow">2026 goals & objectives</div><h1>Team progress check-in</h1>
+        <p>Manual H1 baseline with drill-down to key results and linked work.</p></div>
+        <div class="go-summary"><strong>${goals.length}</strong><span>objectives</span><strong>${State.keyResults.length}</strong><span>key results</span></div>
+      </section>
+      <div class="go-layout">
+        <section class="go-objectives">${goals.map(renderGoalRow).join("")}</section>
+        <aside class="go-risk-panel"><div class="go-section-title">At risk / watch</div>
+          ${risks.length ? risks.map(renderRiskItem).join("") : '<div class="go-empty">No key-result risks recorded.</div>'}
+        </aside>
+      </div>`;
+
+    host.querySelectorAll("[data-goal-toggle]").forEach((btn) => btn.addEventListener("click", () => {
+      const id = btn.dataset.goalToggle;
+      State.expandedGoals.has(id) ? State.expandedGoals.delete(id) : State.expandedGoals.add(id);
+      renderGoalsDashboard();
+    }));
+    host.querySelectorAll("[data-kr-toggle]").forEach((btn) => btn.addEventListener("click", () => {
+      const id = btn.dataset.krToggle;
+      State.expandedKeyResults.has(id) ? State.expandedKeyResults.delete(id) : State.expandedKeyResults.add(id);
+      renderGoalsDashboard();
+    }));
+    host.querySelectorAll("[data-open-task]").forEach((btn) => btn.addEventListener("click", () => openEditModal(btn.dataset.openTask)));
+  }
+
+  function renderGoalRow(goal) {
+    const gid = String(goal.GoalID);
+    const pct = goalProgress(gid);
+    const rows = State.keyResults.filter((kr) => String(kr.GoalID) === gid);
+    const open = State.expandedGoals.has(gid);
+    return `<article class="go-objective ${open ? "expanded" : ""}">
+      <button class="go-objective-main" data-goal-toggle="${escapeAttr(gid)}" type="button">
+        <span class="go-number">${escapeHtml(goal.Order || gid)}</span>
+        <span class="go-title-block"><strong>${escapeHtml(goal.ShortName || goal.GoalName || gid)}</strong>
+          <small>${escapeHtml(goal.GoalName || "")}</small></span>
+        <span class="go-progress"><span><i style="width:${pct.toFixed(1)}%"></i></span><b>${Math.round(pct)}%</b></span>
+        <span class="go-chevron">${open ? "⌃" : "⌄"}</span>
+      </button>
+      <div class="go-narrative"><div><label>Delivered / done</label><p>${escapeHtml(goal.SummaryDone || "No summary recorded.")}</p></div>
+        <div><label>Next focus</label><p>${escapeHtml(goal.SummaryFocus || "No focus recorded.")}</p></div></div>
+      ${open ? `<div class="go-kr-list">${rows.map(renderKeyResultRow).join("")}</div>` : ""}
+    </article>`;
+  }
+
+  function renderKeyResultRow(kr) {
+    const id = String(kr.KeyResultID);
+    const pct = keyResultProgress(kr);
+    const links = linksForKeyResult(id);
+    const open = State.expandedKeyResults.has(id);
+    return `<section class="go-kr ${open ? "expanded" : ""}">
+      <button class="go-kr-head" data-kr-toggle="${escapeAttr(id)}" type="button">
+        <span class="go-kr-id">${escapeHtml(id)}</span><span class="go-kr-name">${escapeHtml(kr.KeyResultName || id)}</span>
+        <span class="go-basis">${escapeHtml(kr.CalculationMode || "Manual")}</span>
+        <span class="go-kr-pct">${Math.round(pct)}%</span><span>${open ? "−" : "+"}</span>
+      </button>
+      ${open ? `<div class="go-kr-detail">
+        <p>${escapeHtml(kr.Description || "")}</p>
+        <div class="go-kr-meta"><span>${escapeHtml(metricSummary(kr) || "Manual assessment")}</span>
+          <span class="${goalHealthClass(kr.Health)}">${escapeHtml(kr.Health || "Not Started")}</span>
+          <span>${links.length} linked work item${links.length === 1 ? "" : "s"}</span></div>
+        ${kr.H2Focus ? `<div class="go-focus"><strong>H2 focus</strong>${escapeHtml(kr.H2Focus)}</div>` : ""}
+        ${kr.RiskSummary ? `<div class="go-risk-detail"><strong>Risk</strong>${escapeHtml(kr.RiskSummary)}${kr.Mitigation ? `<br><strong>Mitigation</strong>${escapeHtml(kr.Mitigation)}` : ""}</div>` : ""}
+        <div class="go-linked-list">${links.length ? links.map(renderGoalLink).join("") : '<div class="go-empty">No linked work.</div>'}</div>
+      </div>` : ""}
+    </section>`;
+  }
+
+  function renderGoalLink(link) {
+    const task = linkedTask(link);
+    const archived = task && String(task.Archived || "").toLowerCase() === "yes";
+    const status = task ? (task.Status || "") : "Missing";
+    const title = task ? task.Title : `${link.ParentType} ${link.ParentID}`;
+    return `<div class="go-link ${archived ? "historical" : ""}">
+      <button type="button" ${task && !archived ? `data-open-task="${escapeAttr(task.TaskID)}"` : "disabled"}>
+        <span class="go-link-title">${escapeHtml(title || "Untitled")}</span>
+        <span class="go-link-status">${escapeHtml(archived ? "Historical evidence" : status)}</span>
+        <span class="go-evidence ev-${String(link.EvidenceStatus || "none").toLowerCase()}">${escapeHtml(link.EvidenceStatus || "None")}</span>
+      </button></div>`;
+  }
+
+  function renderRiskItem(kr) {
+    const goal = State.goals.find((g) => String(g.GoalID) === String(kr.GoalID));
+    return `<article class="go-risk-item"><div><span>${escapeHtml(kr.KeyResultID)}</span>${escapeHtml(goal ? (goal.ShortName || goal.GoalID) : kr.GoalID)}</div>
+      <strong>${escapeHtml(kr.KeyResultName || "")}</strong><p>${escapeHtml(kr.RiskSummary || "")}</p>
+      ${kr.Mitigation ? `<small><b>Mitigation:</b> ${escapeHtml(kr.Mitigation)}</small>` : ""}</article>`;
   }
 
   function renderBoard(boardEl, taskList) {
