@@ -1480,3 +1480,37 @@ html, body {
 .go-empty { color: #999; font-style: italic; padding: 12px; }
 @media (max-width: 1050px) { .go-layout { grid-template-columns: 1fr; } .go-risk-panel { position: static; } }
 @media (max-width: 760px) { .goalsview { padding: 10px; } .go-hero { align-items: flex-start; flex-direction: column; } .go-objective-main { grid-template-columns: 40px 1fr 24px; } .go-progress { grid-column: 2 / 3; } .go-narrative { grid-template-columns: 1fr; padding-left: 72px; } .go-kr-head { grid-template-columns: 54px 1fr 48px 16px; } .go-basis { display: none; } .go-kr-detail { padding-left: 12px; } }
+
+
+/* Stage 2: editable goals and task alignment */
+.go-add-btn { margin-top: 14px; background: #fff; color: #a70018; border: 1px solid rgba(255,255,255,.7); font-weight: 800; }
+.go-row-actions, .go-kr-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.go-row-actions [data-edit-goal], .go-kr-actions [data-edit-kr] { position: relative; z-index: 2; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; color: #777; }
+.go-row-actions [data-edit-goal]:hover, .go-kr-actions [data-edit-kr]:hover { background: #fdecef; color: #CA001B; }
+.go-kr-toolbar { display: flex; justify-content: flex-end; padding: 2px 4px 6px; }
+.go-link-status, .go-evidence { display: flex; flex-direction: column; gap: 2px; }
+.go-link-status small, .go-evidence small { color: #999; font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+.go-edit-overlay { position: fixed; inset: 0; z-index: 1200; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(25,25,25,.55); }
+.go-edit-modal { width: min(760px, 95vw); max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; background: #fff; border-radius: 14px; box-shadow: 0 24px 70px rgba(0,0,0,.3); }
+.go-edit-modal header, .go-edit-modal footer { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid #eee; }
+.go-edit-modal footer { border-top: 1px solid #eee; border-bottom: 0; }
+.go-edit-modal footer > div { display: flex; gap: 8px; }
+.go-edit-modal header h2 { margin: 0; }
+.go-edit-modal header button { border: 0; background: transparent; font-size: 26px; cursor: pointer; }
+.go-edit-body { padding: 18px 20px; overflow: auto; }
+.go-edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.go-edit-grid label { display: flex; flex-direction: column; gap: 6px; color: #555; font-size: 12px; font-weight: 700; }
+.go-edit-grid .wide { grid-column: 1 / -1; }
+.go-edit-grid input, .go-edit-grid select, .go-edit-grid textarea { width: 100%; box-sizing: border-box; padding: 9px 10px; border: 1px solid #d8d8d8; border-radius: 7px; font: inherit; background: #fff; }
+.go-edit-grid textarea { min-height: 72px; resize: vertical; }
+.kr-align-block { margin: 14px 0; padding: 12px; border: 1px solid #e7e7e7; border-radius: 9px; background: #fafafa; }
+.kr-align-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.kr-align-head small { display: block; color: #888; margin-top: 2px; }
+.kr-task-checks { margin-top: 8px; max-height: 180px; overflow: auto; }
+.kr-task-checks label { display: block; padding: 6px 4px; }
+.kr-task-checks label small { color: #999; margin-left: 5px; }
+.kr-empty { color: #999; font-style: italic; }
+@media (max-width: 700px) { .go-edit-grid { grid-template-columns: 1fr; } .go-edit-grid .wide { grid-column: auto; } }
+
+.go-evidence { border: 0; cursor: pointer; text-align: left; }
+.go-evidence:hover { outline: 1px solid #CA001B; }

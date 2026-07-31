@@ -738,9 +738,27 @@
     const idx = await _findRowIndexById(WS_TABLE, "WorkstreamID", id);
     if (idx >= 0) { await _deleteRow(WS_TABLE, idx); await logActivity("Workstream", id, "Deleted", "", "", "", ""); }
   }
+  async function _nextPrefixedId(tableName, columnName, prefix, width) {
+    const rows = await _readTable(tableName);
+    let max = 0;
+    rows.forEach((row) => {
+      const raw = String(row[columnName] == null ? "" : row[columnName]).trim();
+      const match = raw.match(new RegExp("^" + prefix + "(\\d+)$", "i"));
+      if (match) max = Math.max(max, Number(match[1]) || 0);
+    });
+    return prefix + String(max + 1).padStart(width, "0");
+  }
+
   async function createGoal(obj) {
-    await _appendObjByHeaders(GOALS_TABLE, obj);
-    await logActivity("Goal", obj.GoalID, "Created", "", "", obj.ShortName || obj.GoalName || obj.GoalID, "");
+    const id = obj.GoalID || await _nextPrefixedId(GOALS_TABLE, "GoalID", "G", 1);
+    const row = Object.assign({
+      GoalID: id, GoalName: "", ShortName: "", Description: "", Order: 999,
+      Weight: 1, Owner: "", Health: "Not Started", SummaryDone: "",
+      SummaryFocus: "", Archived: "No"
+    }, obj, { GoalID: id });
+    await _appendObjByHeaders(GOALS_TABLE, row);
+    await logActivity("Goal", id, "Created", "", "", row.ShortName || row.GoalName || id, "");
+    return id;
   }
   async function updateGoal(id, fields) {
     const idx = await _findRowIndexById(GOALS_TABLE, "GoalID", id);
@@ -751,6 +769,59 @@
   async function deleteGoal(id) {
     const idx = await _findRowIndexById(GOALS_TABLE, "GoalID", id);
     if (idx >= 0) { await _deleteRow(GOALS_TABLE, idx); await logActivity("Goal", id, "Deleted", "", "", "", ""); }
+  }
+
+  async function createKeyResult(obj) {
+    const id = obj.KeyResultID || await _nextPrefixedId(KR_TABLE, "KeyResultID", "KR", 3);
+    const row = Object.assign({
+      KeyResultID: id, GoalID: "", KeyResultName: "", Description: "", MetricType: "Qualitative",
+      TargetValue: "", StartValue: "", CurrentValue: "", Unit: "", Direction: "Increase",
+      ManualPercent: 0, CalculationMode: "Manual", Weight: 1, Quarter: "Yearly", Owner: "",
+      Health: "Not Started", RiskSummary: "", Mitigation: "", H2Focus: "", EvidenceUrl: "",
+      Archived: "No", LastUpdated: _nowIso(), UpdatedBy: ""
+    }, obj, { KeyResultID: id, LastUpdated: _nowIso() });
+    await _appendObjByHeaders(KR_TABLE, row);
+    await logActivity("KeyResult", id, "Created", "", "", row.KeyResultName || id, "");
+    return id;
+  }
+
+  async function updateKeyResult(id, fields) {
+    const idx = await _findRowIndexById(KR_TABLE, "KeyResultID", id);
+    if (idx < 0) throw new Error("Key result not found: " + id);
+    const updates = Object.assign({}, fields, { LastUpdated: _nowIso() });
+    await _updateRowMulti(KR_TABLE, idx, updates);
+    await logActivity("KeyResult", id, "Updated", "", "", fields.KeyResultName || "", "");
+  }
+
+  async function archiveKeyResult(id) {
+    await updateKeyResult(id, { Archived: "Yes" });
+  }
+
+  async function syncTaskKeyResultLinks(parentType, parentId, keyResultIds, addedBy, newEvidenceStatus) {
+    const type = parentType || "Task";
+    const pid = String(parentId);
+    const wanted = new Set((keyResultIds || []).map(String));
+    const rows = await _readTable(KR_LINK_TABLE);
+    const existing = rows.filter((r) => String(r.ParentType) === type && String(r.ParentID) === pid);
+    for (const row of existing.slice().sort((a, b) => b._rowIndex - a._rowIndex)) {
+      if (!wanted.has(String(row.KeyResultID))) await _deleteRow(KR_LINK_TABLE, row._rowIndex);
+    }
+    for (const krid of wanted) {
+      if (existing.some((r) => String(r.KeyResultID) === krid)) continue;
+      const linkId = await _nextPrefixedId(KR_LINK_TABLE, "LinkID", "KRL", 4);
+      await _appendObjByHeaders(KR_LINK_TABLE, {
+        LinkID: linkId, ParentType: type, ParentID: parentId, KeyResultID: krid,
+        ContributionType: "Direct", ContributionWeight: "", ContributionValue: "",
+        EvidenceStatus: newEvidenceStatus || "None", EvidenceNote: "", VerifiedBy: "",
+        VerifiedDate: "", LastUpdated: _nowIso(), UpdatedBy: addedBy || ""
+      });
+    }
+  }
+
+  async function updateTaskKeyResultLink(linkId, fields) {
+    const idx = await _findRowIndexById(KR_LINK_TABLE, "LinkID", linkId);
+    if (idx < 0) throw new Error("Task-key-result link not found: " + linkId);
+    await _updateRowMulti(KR_LINK_TABLE, idx, Object.assign({}, fields, { LastUpdated: _nowIso() }));
   }
 
   // ----- Milestones (standalone dated lines on the roadmap — NOT tasks) -----
@@ -806,6 +877,8 @@
     renameOwner, renameQuarter, renameStatus, setStatusColor, setStatusOrder, updateStatusRow, addTableColumns, setCompleteStatuses,
     createWorkstream, updateWorkstream, deleteWorkstream,
     createGoal, updateGoal, deleteGoal,
+    createKeyResult, updateKeyResult, archiveKeyResult,
+    syncTaskKeyResultLinks, updateTaskKeyResultLink,
     // milestones (standalone roadmap lines)
     readMilestones, createMilestone, updateMilestone, deleteMilestone,
     // activity

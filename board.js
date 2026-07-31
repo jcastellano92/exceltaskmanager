@@ -132,7 +132,9 @@
       "countTasksByField", "countTasksByWorkstream", "countTasksByGoal",
       "renameOwner", "renameQuarter", "renameStatus", "setStatusColor", "setStatusOrder", "updateStatusRow", "addTableColumns", "setCompleteStatuses",
       "createWorkstream", "updateWorkstream", "deleteWorkstream",
-      "createGoal", "updateGoal", "deleteGoal", "logActivity",
+      "createGoal", "updateGoal", "deleteGoal",
+      "createKeyResult", "updateKeyResult", "archiveKeyResult", "syncTaskKeyResultLinks", "updateTaskKeyResultLink",
+      "createKeyResult", "updateKeyResult", "archiveKeyResult", "syncTaskKeyResultLinks", "updateTaskKeyResultLink", "logActivity",
       "createMilestone", "updateMilestone", "deleteMilestone"
     ];
     const api = {};
@@ -156,7 +158,7 @@
       "addConfigValue", "renameConfigValue", "deleteConfigValue",
       "renameOwner", "renameQuarter", "renameStatus", "setStatusColor", "setStatusOrder", "updateStatusRow", "addTableColumns", "setCompleteStatuses",
       "createWorkstream", "updateWorkstream", "deleteWorkstream",
-      "createGoal", "updateGoal", "deleteGoal",
+      "createGoal", "updateGoal", "deleteGoal", "createKeyResult", "updateKeyResult", "archiveKeyResult", "syncTaskKeyResultLinks", "updateTaskKeyResultLink",
       "createMilestone", "updateMilestone", "deleteMilestone"
     ];
     let chain = Promise.resolve();
@@ -494,11 +496,27 @@
     return "go-health-" + v;
   }
 
+  function formatKrValue(value, metricType, unit) {
+    if (value === "" || value == null) return "Not recorded";
+    const n = Number(value);
+    if (!isFinite(n)) return String(value);
+    const type = String(metricType || "").toLowerCase();
+    if (type === "currency") {
+      if (Math.abs(n) >= 1000000) return "$" + (n / 1000000).toFixed(n % 1000000 ? 1 : 0) + "M";
+      if (Math.abs(n) >= 1000) return "$" + (n / 1000).toFixed(n % 1000 ? 1 : 0) + "K";
+      return "$" + n.toLocaleString();
+    }
+    if (type === "percent") return n + "%";
+    if (type === "count") return n.toLocaleString();
+    if (type === "milestone") return n >= 1 ? "Achieved" : "Not achieved";
+    return n.toLocaleString();
+  }
+
   function metricSummary(kr) {
     const bits = [];
-    if (kr.CurrentValue !== "" && kr.CurrentValue != null) bits.push("Current " + kr.CurrentValue);
-    if (kr.TargetValue !== "" && kr.TargetValue != null) bits.push("Target " + kr.TargetValue);
-    if (kr.Unit) bits.push(String(kr.Unit));
+    if (kr.CurrentValue !== "" && kr.CurrentValue != null) bits.push("Current " + formatKrValue(kr.CurrentValue, kr.MetricType, kr.Unit));
+    if (kr.TargetValue !== "" && kr.TargetValue != null) bits.push("Target " + formatKrValue(kr.TargetValue, kr.MetricType, kr.Unit));
+    if (kr.Unit && String(kr.MetricType).toLowerCase() !== "percent") bits.push(String(kr.Unit));
     return bits.join(" · ");
   }
 
@@ -519,7 +537,8 @@
     host.innerHTML = `
       <section class="go-hero">
         <div><div class="go-eyebrow">2026 goals & objectives</div><h1>Team progress check-in</h1>
-        <p>Manual H1 baseline with drill-down to key results and linked work.</p></div>
+        <p>Manage objectives, key results, evidence, and linked work.</p>
+        <button class="btn go-add-btn" data-add-goal type="button">+ Add objective</button></div>
         <div class="go-summary"><strong>${goals.length}</strong><span>objectives</span><strong>${State.keyResults.length}</strong><span>key results</span></div>
       </section>
       <div class="go-layout">
@@ -529,6 +548,17 @@
         </aside>
       </div>`;
 
+    const addGoal = host.querySelector("[data-add-goal]");
+    if (addGoal) addGoal.addEventListener("click", () => openGoalEditor(null));
+    host.querySelectorAll("[data-edit-goal]").forEach((btn) => btn.addEventListener("click", (e) => {
+      e.stopPropagation(); openGoalEditor(State.goals.find((g) => String(g.GoalID) === btn.dataset.editGoal));
+    }));
+    host.querySelectorAll("[data-add-kr]").forEach((btn) => btn.addEventListener("click", (e) => {
+      e.stopPropagation(); openKeyResultEditor(null, btn.dataset.addKr);
+    }));
+    host.querySelectorAll("[data-edit-kr]").forEach((btn) => btn.addEventListener("click", (e) => {
+      e.stopPropagation(); openKeyResultEditor(State.keyResults.find((kr) => String(kr.KeyResultID) === btn.dataset.editKr));
+    }));
     host.querySelectorAll("[data-goal-toggle]").forEach((btn) => btn.addEventListener("click", () => {
       const id = btn.dataset.goalToggle;
       State.expandedGoals.has(id) ? State.expandedGoals.delete(id) : State.expandedGoals.add(id);
@@ -540,6 +570,9 @@
       renderGoalsDashboard();
     }));
     host.querySelectorAll("[data-open-task]").forEach((btn) => btn.addEventListener("click", () => openEditModal(btn.dataset.openTask)));
+    host.querySelectorAll("[data-evidence-link]").forEach((btn) => btn.addEventListener("click", (e) => {
+      e.stopPropagation(); openEvidenceEditor(State.keyResultLinks.find((l) => String(l.LinkID) === btn.dataset.evidenceLink));
+    }));
   }
 
   function renderGoalRow(goal) {
@@ -553,11 +586,11 @@
         <span class="go-title-block"><strong>${escapeHtml(goal.ShortName || goal.GoalName || gid)}</strong>
           <small>${escapeHtml(goal.GoalName || "")}</small></span>
         <span class="go-progress"><span><i style="width:${pct.toFixed(1)}%"></i></span><b>${Math.round(pct)}%</b></span>
-        <span class="go-chevron">${open ? "⌃" : "⌄"}</span>
+        <span class="go-row-actions"><span data-edit-goal="${escapeAttr(gid)}" title="Edit objective">✎</span><span class="go-chevron">${open ? "⌃" : "⌄"}</span></span>
       </button>
       <div class="go-narrative"><div><label>Delivered / done</label><p>${escapeHtml(goal.SummaryDone || "No summary recorded.")}</p></div>
         <div><label>Next focus</label><p>${escapeHtml(goal.SummaryFocus || "No focus recorded.")}</p></div></div>
-      ${open ? `<div class="go-kr-list">${rows.map(renderKeyResultRow).join("")}</div>` : ""}
+      ${open ? `<div class="go-kr-list"><div class="go-kr-toolbar"><button class="btn-link" data-add-kr="${escapeAttr(gid)}" type="button">+ Add key result</button></div>${rows.map(renderKeyResultRow).join("")}</div>` : ""}
     </article>`;
   }
 
@@ -570,7 +603,7 @@
       <button class="go-kr-head" data-kr-toggle="${escapeAttr(id)}" type="button">
         <span class="go-kr-id">${escapeHtml(id)}</span><span class="go-kr-name">${escapeHtml(kr.KeyResultName || id)}</span>
         <span class="go-basis">${escapeHtml(kr.CalculationMode || "Manual")}</span>
-        <span class="go-kr-pct">${Math.round(pct)}%</span><span>${open ? "−" : "+"}</span>
+        <span class="go-kr-pct">${Math.round(pct)}%</span><span class="go-kr-actions"><span data-edit-kr="${escapeAttr(id)}" title="Edit key result">✎</span><span>${open ? "−" : "+"}</span></span>
       </button>
       ${open ? `<div class="go-kr-detail">
         <p>${escapeHtml(kr.Description || "")}</p>
@@ -592,9 +625,115 @@
     return `<div class="go-link ${archived ? "historical" : ""}">
       <button type="button" ${task && !archived ? `data-open-task="${escapeAttr(task.TaskID)}"` : "disabled"}>
         <span class="go-link-title">${escapeHtml(title || "Untitled")}</span>
-        <span class="go-link-status">${escapeHtml(archived ? "Historical evidence" : status)}</span>
-        <span class="go-evidence ev-${String(link.EvidenceStatus || "none").toLowerCase()}">${escapeHtml(link.EvidenceStatus || "None")}</span>
+        <span class="go-link-status"><small>Task status</small>${escapeHtml(archived ? "Historical evidence" : status)}</span>
+        <button class="go-evidence ev-${String(link.EvidenceStatus || "none").toLowerCase()}" data-evidence-link="${escapeAttr(link.LinkID)}" type="button"><small>Evidence</small>${escapeHtml(evidenceLabel(link.EvidenceStatus))}</button>
       </button></div>`;
+  }
+
+  function evidenceLabel(value) {
+    const v = String(value || "None");
+    return v === "Pending" ? "Awaiting Review" : v;
+  }
+
+  function openEvidenceEditor(link) {
+    if (!link) return;
+    const body = `<div class="go-edit-grid">
+      <label>Evidence status<select data-f="EvidenceStatus">${optionMarkup(["None","Pending","Submitted","Verified","Rejected"], link.EvidenceStatus || "None")}</select></label>
+      <label>Verified by<input data-f="VerifiedBy" value="${escapeAttr(link.VerifiedBy || "")}"></label>
+      <label class="wide">Evidence note<textarea data-f="EvidenceNote">${escapeHtml(link.EvidenceNote || "")}</textarea></label></div>`;
+    showStage2Editor("Review evidence", body, async (o) => {
+      const fields = editorValues(o);
+      fields.UpdatedBy = State.me.name;
+      if (fields.EvidenceStatus === "Verified") {
+        fields.VerifiedBy = fields.VerifiedBy || State.me.name;
+        fields.VerifiedDate = new Date().toISOString().slice(0, 10);
+      } else {
+        fields.VerifiedDate = "";
+      }
+      await window.WsjfData.updateTaskKeyResultLink(link.LinkID, fields);
+    });
+  }
+
+  function optionMarkup(values, selected) {
+    return (values || []).map((v) => `<option value="${escapeAttr(v)}" ${String(v) === String(selected || "") ? "selected" : ""}>${escapeHtml(v)}</option>`).join("");
+  }
+
+  function showStage2Editor(title, body, onSave, archiveAction) {
+    let overlay = document.getElementById("go-edit-overlay");
+    if (overlay) overlay.remove();
+    overlay = document.createElement("div");
+    overlay.id = "go-edit-overlay";
+    overlay.className = "go-edit-overlay";
+    overlay.innerHTML = `<div class="go-edit-modal"><header><h2>${escapeHtml(title)}</h2><button type="button" data-close>×</button></header>
+      <div class="go-edit-body">${body}</div><footer>${archiveAction ? '<button class="btn btn-archive" data-archive type="button">Archive</button>' : '<span></span>'}
+      <div><button class="btn btn-secondary" data-close type="button">Cancel</button><button class="btn btn-primary" data-save type="button">Save</button></div></footer></div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", () => overlay.remove()));
+    overlay.querySelector("[data-save]").addEventListener("click", async () => {
+      const btn = overlay.querySelector("[data-save]"); btn.disabled = true;
+      try { await onSave(overlay); overlay.remove(); await loadConfigAndDimensions(); render(); }
+      catch (err) { toast("Save failed: " + err.message, "error"); btn.disabled = false; }
+    });
+    if (archiveAction) overlay.querySelector("[data-archive]").addEventListener("click", async () => {
+      if (!(await uiConfirm("Archive this item? Existing historical links will remain.", { okText: "Archive" }))) return;
+      await archiveAction(); overlay.remove(); await loadConfigAndDimensions(); render();
+    });
+  }
+
+  function openGoalEditor(goal, afterCreate) {
+    const g = goal || {};
+    const body = `<div class="go-edit-grid">
+      <label>Objective name<input data-f="GoalName" value="${escapeAttr(g.GoalName || "")}"></label>
+      <label>Short name<input data-f="ShortName" value="${escapeAttr(g.ShortName || "")}"></label>
+      <label class="wide">Description<textarea data-f="Description">${escapeHtml(g.Description || "")}</textarea></label>
+      <label>Order<input data-f="Order" type="number" value="${escapeAttr(g.Order || State.goals.length + 1)}"></label>
+      <label>Weight<input data-f="Weight" type="number" step="0.01" value="${escapeAttr(g.Weight || 1)}"></label>
+      <label>Owner<select data-f="Owner"><option value=""></option>${optionMarkup(State.config.Owners, g.Owner)}</select></label>
+      <label>Health<select data-f="Health">${optionMarkup(["Green","Amber","Red","Not Started"], g.Health || "Not Started")}</select></label>
+      <label class="wide">Delivered / done<textarea data-f="SummaryDone">${escapeHtml(g.SummaryDone || "")}</textarea></label>
+      <label class="wide">Next focus<textarea data-f="SummaryFocus">${escapeHtml(g.SummaryFocus || "")}</textarea></label></div>`;
+    showStage2Editor(goal ? "Edit objective" : "Add objective", body, async (o) => {
+      const fields = editorValues(o);
+      if (!fields.GoalName.trim()) throw new Error("Objective name is required.");
+      fields.UpdatedBy = State.me.name;
+      const id = goal ? (await window.WsjfData.updateGoal(goal.GoalID, fields), goal.GoalID) : await window.WsjfData.createGoal(fields);
+      if (afterCreate) await afterCreate(id);
+    }, goal ? () => window.WsjfData.updateGoal(goal.GoalID, { Archived: "Yes" }) : null);
+  }
+
+  function openKeyResultEditor(kr, defaultGoalId, afterCreate) {
+    const k = kr || {};
+    const goalId = k.GoalID || defaultGoalId || currentTaskGoals()[0] || "";
+    const body = `<div class="go-edit-grid">
+      <label>Objective<select data-f="GoalID">${State.goals.map((g) => `<option value="${escapeAttr(g.GoalID)}" ${String(g.GoalID)===String(goalId)?"selected":""}>${escapeHtml(g.ShortName || g.GoalName)}</option>`).join("")}</select></label>
+      <label>Key result name<input data-f="KeyResultName" value="${escapeAttr(k.KeyResultName || "")}"></label>
+      <label class="wide">Description<textarea data-f="Description">${escapeHtml(k.Description || "")}</textarea></label>
+      <label>Metric type<select data-f="MetricType">${optionMarkup(["Percent","Currency","Count","Ratio","Milestone","Qualitative"], k.MetricType || "Qualitative")}</select></label>
+      <label>Unit<input data-f="Unit" value="${escapeAttr(k.Unit || "")}"></label>
+      <label>Target value<input data-f="TargetValue" type="number" step="any" value="${escapeAttr(k.TargetValue == null ? "" : k.TargetValue)}"></label>
+      <label>Current value<input data-f="CurrentValue" type="number" step="any" value="${escapeAttr(k.CurrentValue == null ? "" : k.CurrentValue)}"></label>
+      <label>Progress %<input data-f="ManualPercent" type="number" min="0" max="100" value="${escapeAttr(Math.round(Number(k.ManualPercent || 0)*100))}"></label>
+      <label>Weight<input data-f="Weight" type="number" step="0.01" value="${escapeAttr(k.Weight || 1)}"></label>
+      <label>Quarter<select data-f="Quarter">${optionMarkup(State.config.Quarters, k.Quarter || "Yearly")}</select></label>
+      <label>Owner<select data-f="Owner"><option value=""></option>${optionMarkup(State.config.Owners, k.Owner)}</select></label>
+      <label>Health<select data-f="Health">${optionMarkup(["Green","Amber","Red","Not Started"], k.Health || "Not Started")}</select></label>
+      <label class="wide">Risk<textarea data-f="RiskSummary">${escapeHtml(k.RiskSummary || "")}</textarea></label>
+      <label class="wide">Mitigation<textarea data-f="Mitigation">${escapeHtml(k.Mitigation || "")}</textarea></label>
+      <label class="wide">Next focus<textarea data-f="H2Focus">${escapeHtml(k.H2Focus || "")}</textarea></label></div>`;
+    showStage2Editor(kr ? "Edit key result" : "Add key result", body, async (o) => {
+      const fields = editorValues(o);
+      if (!fields.GoalID || !fields.KeyResultName.trim()) throw new Error("Objective and key result name are required.");
+      fields.ManualPercent = Math.max(0, Math.min(100, Number(fields.ManualPercent) || 0)) / 100;
+      fields.CalculationMode = "Manual"; fields.Direction = "Increase"; fields.Archived = "No"; fields.UpdatedBy = State.me.name;
+      const id = kr ? (await window.WsjfData.updateKeyResult(kr.KeyResultID, fields), kr.KeyResultID) : await window.WsjfData.createKeyResult(fields);
+      if (afterCreate) await afterCreate(id);
+    }, kr ? () => window.WsjfData.archiveKeyResult(kr.KeyResultID) : null);
+  }
+
+  function editorValues(overlay) {
+    const out = {};
+    overlay.querySelectorAll("[data-f]").forEach((el) => { out[el.dataset.f] = el.value; });
+    return out;
   }
 
   function renderRiskItem(kr) {
@@ -3613,6 +3752,12 @@
 
     // Subtask add → opens the subtask modal in create mode
     document.getElementById("m-add-subtask").addEventListener("click", () => openSubtaskModal(null));
+    document.getElementById("m-quick-goal").addEventListener("click", () => openGoalEditor(null, async (id) => {
+      await loadConfigAndDimensions(); renderTaskGoals(currentTaskGoals().concat([id])); renderTaskKeyResults(currentTaskKeyResults()); markDirty();
+    }));
+    document.getElementById("m-quick-kr").addEventListener("click", () => openKeyResultEditor(null, currentTaskGoals()[0], async (id) => {
+      await loadConfigAndDimensions(); renderTaskKeyResults(currentTaskKeyResults().concat([id])); markDirty();
+    }));
 
     // Attachments
     document.getElementById("m-add-att").addEventListener("click", () => {
@@ -3861,6 +4006,8 @@
         State.workstreams.map((w) => ({ value: w.WorkstreamID, label: w.Name || w.WorkstreamID }))),
       null, t.WorkstreamID);
     renderTaskGoals(String(t.GoalID || "").split(/[;,]/).map((x) => x.trim()).filter(Boolean));
+    const selectedKrs = t.TaskID ? State.keyResultLinks.filter((l) => String(l.ParentType) === "Task" && String(l.ParentID) === String(t.TaskID)).map((l) => String(l.KeyResultID)) : [];
+    renderTaskKeyResults(selectedKrs);
     fillSelect("m-quarter", State.config.Quarters, null, t.Quarter);
     fillSelect("m-status", State.config.Statuses, null, t.Status);
     paintStatusSelect();
@@ -4380,6 +4527,21 @@
   }
 
   // ───── Tags ─────
+
+  function currentTaskKeyResults() {
+    return Array.from(document.querySelectorAll("#m-keyresults input:checked")).map((c) => c.value);
+  }
+
+  function renderTaskKeyResults(selected) {
+    const wrap = document.getElementById("m-keyresults");
+    if (!wrap) return;
+    const selectedSet = new Set((selected || []).map(String));
+    const selectedGoals = new Set(currentTaskGoals());
+    const rows = State.keyResults.filter((kr) => !selectedGoals.size || selectedGoals.has(String(kr.GoalID)) || selectedSet.has(String(kr.KeyResultID)));
+    wrap.innerHTML = rows.length ? rows.map((kr) => `<label><input type="checkbox" value="${escapeAttr(kr.KeyResultID)}" ${selectedSet.has(String(kr.KeyResultID)) ? "checked" : ""}> ${escapeHtml(kr.KeyResultName || kr.KeyResultID)} <small>${escapeHtml(kr.KeyResultID)}</small></label>`).join("") : '<span class="kr-empty">Select an objective to see its key results.</span>';
+    wrap.querySelectorAll("input").forEach((cb) => cb.addEventListener("change", markDirty));
+  }
+
   function collectAllTags() {
     const set = new Set();
     State.tasks.forEach((t) => {
@@ -4648,7 +4810,14 @@
         toast("Task created.", "info");
       }
 
+      let newEvidenceStatus = "None";
+      if (isCompleteStatus(t.Status) && currentTaskKeyResults().length) {
+        const submit = await uiConfirm("This task is complete. Submit the selected links as evidence for review?", { okText: "Submit evidence", cancelText: "Not now" });
+        if (submit) newEvidenceStatus = "Submitted";
+      }
+      await window.WsjfData.syncTaskKeyResultLinks("Task", t.TaskID, currentTaskKeyResults(), State.me.name, newEvidenceStatus);
       modalDirty = false;
+      await loadConfigAndDimensions();
       await reloadTasks();
       render();
       hideModal();
@@ -4669,7 +4838,14 @@
     try {
       await window.WsjfData.archiveTask(currentEditingTask.TaskID);
       toast("Archived.", "info");
+      let newEvidenceStatus = "None";
+      if (isCompleteStatus(t.Status) && currentTaskKeyResults().length) {
+        const submit = await uiConfirm("This task is complete. Submit the selected links as evidence for review?", { okText: "Submit evidence", cancelText: "Not now" });
+        if (submit) newEvidenceStatus = "Submitted";
+      }
+      await window.WsjfData.syncTaskKeyResultLinks("Task", t.TaskID, currentTaskKeyResults(), State.me.name, newEvidenceStatus);
       modalDirty = false;
+      await loadConfigAndDimensions();
       await reloadTasks();
       render();
       hideModal();
