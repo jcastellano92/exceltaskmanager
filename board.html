@@ -11,7 +11,7 @@
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
   <!-- Self-hosted (a CDN reference here gets blocked on locked-down corporate networks, which silently kills drag-and-drop). -->
   <script src="sortable.min.js?v=20260701f"></script>
-  <link rel="stylesheet" href="board.css?v=20260731g" />
+  <link rel="stylesheet" href="board.css?v=20260731attention2" />
 
 <!--[if gte mso 9]><xml>
 <mso:CustomDocumentProperties>
@@ -223,9 +223,18 @@
                 <select id="m-workstream"></select>
               </div>
               <div>
-                <label class="field-label">Goals</label>
+                <label class="field-label">Objectives</label>
                 <div class="contrib-checks" id="m-goal"></div>
+                <button class="btn-link" id="m-quick-goal" type="button">+ New objective</button>
               </div>
+            </div>
+
+            <div class="kr-align-block">
+              <div class="kr-align-head">
+                <div><label class="field-label">Contributes to key results</label><small>Choose the measurable outcomes this work supports.</small></div>
+                <button class="btn-link" id="m-quick-kr" type="button">+ New key result</button>
+              </div>
+              <div class="contrib-checks kr-task-checks" id="m-keyresults"></div>
             </div>
 
             <label class="field-label">Tags</label>
@@ -328,7 +337,7 @@
 <!-- toasts -->
 <div id="toast-host" class="toast-host"></div>
 
-<script src="data.js?v=20260731g"></script>
-<script src="board.js?v=20260731g"></script>
+<script src="data.js?v=20260731goalsfinal"></script>
+<script src="board.js?v=20260731attention2"></script>
 </body>
 </html>
