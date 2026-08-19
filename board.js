@@ -124,7 +124,7 @@
     }
     const methods = [
       "getCurrentUser", "setCurrentUser", "readAllTasks", "readArchivedTasks", "readTaskById", "readKeyResults", "readTaskKeyResultLinks", "readAllAttachments",
-      "writeTask", "writeTaskStatus", "createTask", "archiveTask",
+      "writeTask", "writeTaskStatus", "setTaskRoadmapGroup", "createTask", "archiveTask",
       "readSubtasksForTask", "readAttachmentsForTask", "readActivityForTask",
       "readUpdatesForParent", "createUpdate",
       "writeSubtask", "createSubtask", "deleteSubtask", "toggleSubtask",
@@ -153,7 +153,7 @@
   // pendingWrites/lastWriteTs counters let polling defer while writes are active.
   function installWriteQueue() {
     const mutating = [
-      "writeTask", "writeTaskStatus", "createTask", "archiveTask",
+      "writeTask", "writeTaskStatus", "setTaskRoadmapGroup", "createTask", "archiveTask",
       "writeSubtask", "createSubtask", "deleteSubtask", "toggleSubtask",
       "writeAttachment", "createAttachment", "deleteAttachment",
       "addConfigValue", "renameConfigValue", "deleteConfigValue",
@@ -2813,7 +2813,7 @@
     if (!name) return;
     toast("Grouping " + tasks.length + "…", "info");
     try {
-      for (const t of tasks) await window.WsjfData.writeTask({ TaskID: t.TaskID, RoadmapGroup: name }, { force: true, silent: true });
+      await window.WsjfData.setTaskRoadmapGroup(tasks.map((t) => t.TaskID), name);
       State.roadmap.selected.clear();
       await reloadTasks();
       renderRoadmap();

@@ -323,6 +323,46 @@
     return ts;
   }
 
+
+  // Roadmap grouping is a first-class bulk write because dialog-mode grouping
+  // must not depend on a partial task save or silently ignore a missing column.
+  async function setTaskRoadmapGroup(taskIds, groupName) {
+    const ids = Array.from(new Set((taskIds || []).map((id) => String(id == null ? "" : id).trim()).filter(Boolean)));
+    if (!ids.length) return 0;
+    const me = await getCurrentUser();
+    const ts = _nowIso();
+    return Excel.run(async (ctx) => {
+      const tbl = ctx.workbook.tables.getItem(TASKS_TABLE);
+      const header = tbl.getHeaderRowRange();
+      const body = tbl.getDataBodyRange();
+      header.load("values");
+      body.load("values");
+      await ctx.sync();
+
+      const headers = header.values[0];
+      const idIdx = headers.indexOf("TaskID");
+      const groupIdx = headers.indexOf("RoadmapGroup");
+      const updatedIdx = headers.indexOf("LastUpdated");
+      const updatedByIdx = headers.indexOf("UpdatedBy");
+      if (idIdx < 0) throw new Error("Column TaskID not found in " + TASKS_TABLE);
+      if (groupIdx < 0) throw new Error("Column RoadmapGroup not found in " + TASKS_TABLE + ". Add it exactly as shown, then retry.");
+
+      const wanted = new Set(ids);
+      let changed = 0;
+      body.values.forEach((row, rowIndex) => {
+        const id = String(row[idIdx] == null ? "" : row[idIdx]).trim();
+        if (!wanted.has(id)) return;
+        body.getCell(rowIndex, groupIdx).values = [[String(groupName == null ? "" : groupName).trim()]];
+        if (updatedIdx >= 0) body.getCell(rowIndex, updatedIdx).values = [[ts]];
+        if (updatedByIdx >= 0) body.getCell(rowIndex, updatedByIdx).values = [[me.name]];
+        changed++;
+      });
+      if (changed !== wanted.size) throw new Error("Only " + changed + " of " + wanted.size + " selected tasks were found in " + TASKS_TABLE + ". Refresh and retry.");
+      await ctx.sync();
+      return changed;
+    });
+  }
+
   async function writeTaskStatus(taskId, newStatus, newColumnOrder) {
     const me = await getCurrentUser();
     const rowIndex = await _findRowIndexById(TASKS_TABLE, "TaskID", taskId);
@@ -888,7 +928,7 @@
     getCurrentUser, setCurrentUser,
     // tasks
     readAllTasks, readArchivedTasks, readTaskById, readKeyResults, readTaskKeyResultLinks, readAllAttachments,
-    writeTask, writeTaskStatus, createTask, archiveTask,
+    writeTask, writeTaskStatus, setTaskRoadmapGroup, createTask, archiveTask,
     // children
     readSubtasksForTask, readAttachmentsForTask, readActivityForTask,
     writeSubtask, createSubtask, deleteSubtask, toggleSubtask,
