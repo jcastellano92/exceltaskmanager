@@ -2637,7 +2637,7 @@
     }
 
     // Axis (quarter columns + today).
-    html += '<div class="rm-row rm-axis-row"><div class="rm-row-label">Workstream</div><div class="rm-row-track rm-axis-track">' +
+    html += '<div class="rm-row rm-axis-row"><div class="rm-row-label">Product</div><div class="rm-row-track rm-axis-track">' +
       ["Q1", "Q2", "Q3", "Q4"].map((q) => '<span class="rm-qcol' + (q === currentQuarter() ? " current" : "") + '">' + q + '</span>').join("") +
       '<div class="rm-today" style="left:' + todayPct + '%" title="Today"></div></div></div>';
 
@@ -3064,7 +3064,7 @@
       if (e < s) e = s;
       return { s: s, e: e };
     };
-    const usedStatuses = boardColumns().filter((s) => members.some((t) => t.Status === s));
+    const usedStatuses = boardColumns();
     const legend = usedStatuses.map((s) => '<span class="rm-leg"><i style="background:' + statusColor(s) + '"></i>' + escapeHtml(s) + '</span>').join("");
 
     const rowsHtml = members.slice().sort((a, b) => { const ra = rng(a).s, rb = rng(b).s; return ra < rb ? -1 : ra > rb ? 1 : 0; }).map((t) => {
