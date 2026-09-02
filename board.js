@@ -24,6 +24,22 @@
   }
   function saveBoardColOrder(order) { lsSet("boardColOrder", JSON.stringify(order)); }
 
+  const UI_SCALE_MIN = 75;
+  const UI_SCALE_MAX = 125;
+  const UI_SCALE_STEP = 5;
+  function normalizeUiScale(value) {
+    const n = Math.round((Number(value) || 100) / UI_SCALE_STEP) * UI_SCALE_STEP;
+    return Math.max(UI_SCALE_MIN, Math.min(UI_SCALE_MAX, n));
+  }
+  function applyUiScale(value) {
+    const scale = normalizeUiScale(value);
+    State.uiScale = scale;
+    document.documentElement.style.setProperty("--ui-scale", String(scale / 100));
+    document.documentElement.style.fontSize = (14 * scale / 100) + "px";
+    lsSet("uiScale", String(scale));
+    return scale;
+  }
+
   // ───── State ─────
   const State = {
     me: { name: "Unknown", email: "", initials: "?" },
@@ -59,6 +75,7 @@
                startFrom: "", startTo: "", dueFrom: "", dueTo: "", tags: new Set(), search: "" },
     selectedTags: new Set(),
     modalOpen: false,
+    uiScale: normalizeUiScale(lsGet("uiScale", "100")),
     dragging: false,                     // a card is being dragged right now
     pendingWrites: 0,                    // in-flight Excel writes (poll defers while > 0)
     lastWriteTs: 0,                      // ms timestamp of the last write settling
@@ -74,6 +91,7 @@
         // Route all data access through the task pane via message-passing.
         window.WsjfData = makeRemoteWsjf();
       }
+      applyUiScale(State.uiScale);
       await bootstrap();
       bindUi();
       await ensureIdentity();   // first-run gate: must pick/add a name
@@ -134,7 +152,6 @@
       "renameOwner", "renameQuarter", "renameStatus", "setStatusColor", "setStatusOrder", "updateStatusRow", "addTableColumns", "setCompleteStatuses",
       "createWorkstream", "updateWorkstream", "deleteWorkstream",
       "createGoal", "updateGoal", "deleteGoal",
-      "createKeyResult", "updateKeyResult", "archiveKeyResult", "syncTaskKeyResultLinks", "updateTaskKeyResultLink",
       "createKeyResult", "updateKeyResult", "archiveKeyResult", "syncTaskKeyResultLinks", "updateTaskKeyResultLink", "logActivity",
       "createMilestone", "updateMilestone", "deleteMilestone"
     ];
@@ -2049,15 +2066,19 @@
     return g ? (g.ShortName || g.GoalName || g.GoalID) : token;
   }
 
-  // Is an open task in trouble? Blocked, health-flagged, or overdue.
-  // (The quarter dashboard adds a "behind pace" check on top of this.)
+  // Red risk is authoritative: a person explicitly set the task health to a risk state.
   function isAtRisk(t) {
     if (isCompleteStatus(t.Status)) return false;
+    const h = String(t.Health || "").trim();
+    return h === "At Risk" || h === "Off Track";
+  }
+  // Yellow potential risk is inferred and never duplicates an explicitly marked red risk.
+  function isPotentialRisk(t, fallbackElapsedPct) {
+    if (isCompleteStatus(t.Status) || isAtRisk(t)) return false;
     if (isBlockedStatus(t.Status)) return true;
-    const h = String(t.Health || "");
-    if (h === "At Risk" || h === "Off Track") return true;
     const d = isoDate(t.DueDate);
-    return d && d < new Date().toISOString().slice(0, 10);
+    if (d && d < new Date().toISOString().slice(0, 10)) return true;
+    return isBehindPace(t, fallbackElapsedPct);
   }
   function clampPct(v) {
     const n = Number(v);
@@ -2181,13 +2202,14 @@
     const elapsedPct = quarterElapsedPct(q);
     const behind = elapsedPct != null && total > 0 && pct < elapsedPct - 15;
 
-    // At risk = blocked / off-track / overdue, plus only materially stalled work.
-    const atRisk = qtasks.filter((t) => isAtRisk(t) || isBehindPace(t, elapsedPct)).sort(byWsjfDesc);
+    const atRisk = qtasks.filter(isAtRisk).sort(byWsjfDesc);
+    const potentialRisk = qtasks.filter((t) => isPotentialRisk(t, elapsedPct)).sort(byWsjfDesc);
 
-    // Per-workstream at-risk counts.
-    const wsRisk = {};
+    const wsRisk = {}, wsPotential = {};
     atRisk.forEach((t) => { wsRisk[t.WorkstreamID] = (wsRisk[t.WorkstreamID] || 0) + 1; });
+    potentialRisk.forEach((t) => { wsPotential[t.WorkstreamID] = (wsPotential[t.WorkstreamID] || 0) + 1; });
     const riskWsIds = Object.keys(wsRisk).sort((a, b) => wsRisk[b] - wsRisk[a]);
+    const potentialWsIds = Object.keys(wsPotential).sort((a, b) => wsPotential[b] - wsPotential[a]);
 
     const sec = document.createElement("section");
     sec.className = "ws-dashboard";
@@ -2219,6 +2241,7 @@
       { label: q + " progress", value: pct + "%", cls: behind ? "stat-warn" : "stat-good" },
       { label: "Done", value: done + " / " + total, cls: "" },
       { label: "Open", value: open.length, cls: "" },
+      { label: "Potential risk", value: potentialRisk.length, cls: potentialRisk.length ? "stat-warn" : "" },
       { label: "At risk", value: atRisk.length, cls: atRisk.length ? "stat-danger" : "" }
     ];
     stats.innerHTML = tiles.map((c) =>
@@ -2236,7 +2259,28 @@
       sec.appendChild(pace);
     }
 
-    // Workstreams at risk.
+    // Potential-risk workstreams remain advisory and are intentionally yellow.
+    if (potentialWsIds.length) {
+      const wrap = document.createElement("div");
+      wrap.className = "ws-risk-block potential";
+      wrap.innerHTML = '<div class="ws-sub-label">Potential risk this ' + escapeHtml(q) + ' · inferred from blocked, overdue, or behind-pace work</div>';
+      const chips = document.createElement("div");
+      chips.className = "ws-risk-chips";
+      potentialWsIds.forEach((id) => {
+        const b = document.createElement("button");
+        b.className = "ws-risk-chip potential";
+        b.innerHTML = escapeHtml(workstreamName(id)) + ' <span class="rc-n">' + wsPotential[id] + '</span>';
+        b.addEventListener("click", () => {
+          State.filters.workstream = id; State.filters.quarter = q;
+          State.viewMode = "board"; syncFilterControls(); render();
+        });
+        chips.appendChild(b);
+      });
+      wrap.appendChild(chips);
+      sec.appendChild(wrap);
+    }
+
+    // Workstreams at risk only include tasks explicitly marked At Risk or Off Track.
     if (riskWsIds.length) {
       const wrap = document.createElement("div");
       wrap.className = "ws-risk-block";
@@ -2311,7 +2355,8 @@
     const focusDone = focusTasks.filter((t) => isCompleteStatus(t.Status)).length;
     const focusPct = avgTaskProgress(focusTasks);
     const focusElapsedPct = quarterElapsedPct(focusQ);
-    const focusRisk = focusTasks.filter((t) => isAtRisk(t) || isBehindPace(t, focusElapsedPct)).length;
+    const focusRisk = focusTasks.filter(isAtRisk).length;
+    const focusPotential = focusTasks.filter((t) => isPotentialRisk(t, focusElapsedPct)).length;
     const avgWsjf = total ? (tasks.reduce((s, t) => s + (Number(t.WSJF) || 0), 0) / total) : 0;
     const cols = boardColumns();
     const counts = {};
@@ -2353,7 +2398,7 @@
         cols.map((s) => counts[s] ? '<span class="ws-seg" style="flex:' + counts[s] + ';background:' + statusColor(s) + '" title="' + escapeAttr(s + ": " + counts[s]) + '"></span>' : '').join('') +
       '</div>' +
       '<div class="ws-progress-label"><b>' + pctDone + '%</b> avg complete · ' + done + ' / ' + total + ' fully done</div>' +
-      (focusTasks.length ? '<div class="ws-progress-label ws-focus-progress"><b>' + escapeHtml(focusQ) + ':</b> ' + focusPct + '% avg complete · ' + focusDone + '/' + focusTasks.length + ' done' + (focusRisk ? ' · <span class="danger">' + focusRisk + ' at risk</span>' : '') + '</div>' : '') +
+      (focusTasks.length ? '<div class="ws-progress-label ws-focus-progress"><b>' + escapeHtml(focusQ) + ':</b> ' + focusPct + '% avg complete · ' + focusDone + '/' + focusTasks.length + ' done' + (focusPotential ? ' · <span class="warning">' + focusPotential + ' potential risk</span>' : '') + (focusRisk ? ' · <span class="danger">' + focusRisk + ' at risk</span>' : '') + '</div>' : '') +
       '<div class="ws-legend">' + cols.filter((s) => counts[s]).map((s) =>
         '<span class="ws-leg"><i style="background:' + statusColor(s) + '"></i>' + escapeHtml(s) + ' ' + counts[s] + '</span>').join('') + '</div>' +
       '<div class="ws-chips">' +
@@ -2361,7 +2406,8 @@
         (blocked ? '<span class="ws-chip danger">' + blocked + ' blocked</span>' : '') +
         (overdue ? '<span class="ws-chip danger">' + overdue + ' overdue</span>' : '') +
         (focusTasks.length ? '<span class="ws-chip">' + escapeHtml(focusQ) + ' ' + focusPct + '% avg</span>' : '') +
-        (focusRisk ? '<span class="ws-chip danger">' + focusRisk + ' ' + escapeHtml(focusQ) + ' at risk</span>' : '') +
+        (focusPotential ? '<span class="ws-chip warning">' + focusPotential + ' ' + escapeHtml(focusQ) + ' potential risk</span>' : '') +
+          (focusRisk ? '<span class="ws-chip danger">' + focusRisk + ' ' + escapeHtml(focusQ) + ' at risk</span>' : '') +
         '<span class="ws-chip">WSJF ' + avgWsjf.toFixed(1) + ' avg</span>' +
       '</div>' +
       (qRowsHtml ? '<div class="ws-quarters"><div class="ws-sub-label">Progress by quarter</div>' + qRowsHtml + '</div>' : '') +
@@ -2592,7 +2638,7 @@
 
     // Axis (quarter columns + today).
     html += '<div class="rm-row rm-axis-row"><div class="rm-row-label">Workstream</div><div class="rm-row-track rm-axis-track">' +
-      ["Q1", "Q2", "Q3", "Q4"].map((q) => '<span class="rm-qcol">' + q + '</span>').join("") +
+      ["Q1", "Q2", "Q3", "Q4"].map((q) => '<span class="rm-qcol' + (q === currentQuarter() ? " current" : "") + '">' + q + '</span>').join("") +
       '<div class="rm-today" style="left:' + todayPct + '%" title="Today"></div></div></div>';
 
     // Milestone lane (dated diamonds + labels).
@@ -3041,7 +3087,7 @@
         '<div class="rm-legend">' + legend + '<span class="rm-leg-hint">Drag bars to change dates · drag edges to resize · click a bar to open</span></div>' +
         '<div class="rm-scroll"><div class="rm">' +
           '<div class="rm-row rm-axis-row"><div class="rm-row-label">Task</div><div class="rm-row-track rm-axis-track">' +
-            ["Q1", "Q2", "Q3", "Q4"].map((q) => '<span class="rm-qcol">' + q + '</span>').join("") +
+            ["Q1", "Q2", "Q3", "Q4"].map((q) => '<span class="rm-qcol' + (q === currentQuarter() ? " current" : "") + '">' + q + '</span>').join("") +
             '<div class="rm-today" style="left:' + todayPct + '%"></div></div></div>' +
           rowsHtml +
         '</div></div>' +
@@ -3231,6 +3277,7 @@
       'Changes flow through to connected tasks.</p>';
     root.appendChild(intro);
 
+    root.appendChild(configSectionZoom());
     root.appendChild(configSectionStatuses());
 
     root.appendChild(configSectionIdName({
@@ -3291,6 +3338,29 @@
 
   // Board columns (Statuses): rename (cascades to tasks), reorder (remembered),
   // add, and delete-with-reassign (move that column's tasks elsewhere first).
+  function configSectionZoom() {
+    const sec = document.createElement("section");
+    sec.className = "config-section zoom-section";
+    sec.innerHTML = '<div class="config-section-head"><div><h3>Page zoom</h3><p class="muted">Scale the full add-in interface when browser zoom is unavailable.</p></div></div>' +
+      '<div class="zoom-controls"><button class="btn btn-secondary btn-sm" data-zoom-minus type="button">−</button>' +
+      '<input type="range" min="' + UI_SCALE_MIN + '" max="' + UI_SCALE_MAX + '" step="' + UI_SCALE_STEP + '" value="' + State.uiScale + '" data-zoom-range>' +
+      '<button class="btn btn-secondary btn-sm" data-zoom-plus type="button">+</button>' +
+      '<strong data-zoom-value>' + State.uiScale + '%</strong>' +
+      '<button class="btn btn-secondary btn-sm" data-zoom-reset type="button">Reset to 100%</button></div>' +
+      '<p class="zoom-help">Safe range: ' + UI_SCALE_MIN + '% to ' + UI_SCALE_MAX + '%. This preference is stored on this device.</p>';
+    const range = sec.querySelector("[data-zoom-range]");
+    const value = sec.querySelector("[data-zoom-value]");
+    const set = (next) => {
+      const scale = applyUiScale(next);
+      range.value = scale; value.textContent = scale + "%";
+    };
+    range.addEventListener("input", () => set(range.value));
+    sec.querySelector("[data-zoom-minus]").addEventListener("click", () => set(State.uiScale - UI_SCALE_STEP));
+    sec.querySelector("[data-zoom-plus]").addEventListener("click", () => set(State.uiScale + UI_SCALE_STEP));
+    sec.querySelector("[data-zoom-reset]").addEventListener("click", () => set(100));
+    return sec;
+  }
+
   function configSectionStatuses() {
     const sec = document.createElement("section");
     sec.className = "config-section";
@@ -4689,7 +4759,11 @@
       l.className = "contrib-check";
       const cb = document.createElement("input");
       cb.type = "checkbox"; cb.value = g.GoalID; cb.checked = sel.has(String(g.GoalID));
-      cb.addEventListener("change", markDirty);
+      cb.addEventListener("change", () => {
+        const keep = currentTaskKeyResults();
+        renderTaskKeyResults(keep);
+        markDirty();
+      });
       l.appendChild(cb);
       l.appendChild(document.createTextNode(" " + (g.ShortName || g.GoalName || g.GoalID)));
       wrap.appendChild(l);
@@ -4706,9 +4780,17 @@
     const wrap = document.getElementById("m-keyresults");
     if (!wrap) return;
     const selectedSet = new Set((selected || []).map(String));
-    const selectedGoals = new Set(currentTaskGoals());
-    const rows = State.keyResults.filter((kr) => !selectedGoals.size || selectedGoals.has(String(kr.GoalID)) || selectedSet.has(String(kr.KeyResultID)));
-    wrap.innerHTML = rows.length ? rows.map((kr) => `<label><input type="checkbox" value="${escapeAttr(kr.KeyResultID)}" ${selectedSet.has(String(kr.KeyResultID)) ? "checked" : ""}> ${escapeHtml(kr.KeyResultName || kr.KeyResultID)} <small>${escapeHtml(kr.KeyResultID)}</small></label>`).join("") : '<span class="kr-empty">Select an objective to see its key results.</span>';
+    const selectedGoals = new Set(currentTaskGoals().map(String));
+    if (!selectedGoals.size) {
+      wrap.innerHTML = '<span class="kr-empty">Select an objective to see its key results.</span>';
+      return;
+    }
+    const rows = State.keyResults.filter((kr) => selectedGoals.has(String(kr.GoalID)));
+    wrap.innerHTML = rows.length ? rows.map((kr) => {
+      const goal = State.goals.find((g) => String(g.GoalID) === String(kr.GoalID));
+      const goalName = goal ? (goal.ShortName || goal.GoalName || goal.GoalID) : kr.GoalID;
+      return `<label class="kr-task-option"><input type="checkbox" value="${escapeAttr(kr.KeyResultID)}" ${selectedSet.has(String(kr.KeyResultID)) ? "checked" : ""}><span><strong>${escapeHtml(goalName)}</strong><em>${escapeHtml(kr.KeyResultName || kr.KeyResultID)}</em><small>${escapeHtml(kr.KeyResultID)}</small></span></label>`;
+    }).join("") : '<span class="kr-empty">The selected objective has no active key results.</span>';
     wrap.querySelectorAll("input").forEach((cb) => cb.addEventListener("change", markDirty));
   }
 
