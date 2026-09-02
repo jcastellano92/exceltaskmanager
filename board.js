@@ -3028,6 +3028,7 @@
     State.roadmap.focus = null;
     const host = document.getElementById("rm-focus");
     if (host) host.remove();
+    document.body.classList.remove("rm-focus-open");
     renderRoadmap();
   }
   function renderGroupFocus() {
@@ -3035,7 +3036,16 @@
     if (!f) return;
     const members = tasksInGroup(f.wid, f.name);
     let host = document.getElementById("rm-focus");
-    if (!host) { host = document.createElement("div"); host.id = "rm-focus"; host.className = "rm-focus-overlay"; document.body.appendChild(host); }
+    if (!host) {
+      host = document.createElement("div");
+      host.id = "rm-focus";
+      host.className = "rm-focus-overlay";
+      host.setAttribute("role", "dialog");
+      host.setAttribute("aria-modal", "true");
+      host.setAttribute("aria-label", "Roadmap group detail");
+      document.body.appendChild(host);
+    }
+    document.body.classList.add("rm-focus-open");
     if (!members.length) { closeGroupFocus(); return; }   // group emptied → exit
 
     const yr = new Date().getFullYear();
@@ -3086,7 +3096,7 @@
         '</header>' +
         '<div class="rm-legend">' + legend + '<span class="rm-leg-hint">Drag bars to change dates · drag edges to resize · click a bar to open</span></div>' +
         '<div class="rm-scroll"><div class="rm">' +
-          '<div class="rm-row rm-axis-row"><div class="rm-row-label">Task</div><div class="rm-row-track rm-axis-track">' +
+          '<div class="rm-row rm-axis-row"><div class="rm-row-label">Product</div><div class="rm-row-track rm-axis-track">' +
             ["Q1", "Q2", "Q3", "Q4"].map((q) => '<span class="rm-qcol' + (q === currentQuarter() ? " current" : "") + '">' + q + '</span>').join("") +
             '<div class="rm-today" style="left:' + todayPct + '%"></div></div></div>' +
           rowsHtml +
@@ -3095,6 +3105,15 @@
       '</div>';
 
     host.querySelector("#rf-back").addEventListener("click", closeGroupFocus);
+    host.onkeydown = (e) => {
+      if (e.key === "Escape" && !State.modalOpen) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeGroupFocus();
+      }
+    };
+    host.tabIndex = -1;
+    host.focus({ preventScroll: true });
     const titleEl = host.querySelector("#rf-title");
     titleEl.addEventListener("change", () => renameFocusGroup(titleEl.value.trim()));
     host.querySelector("#rf-add").addEventListener("click", openAddToGroupPicker);
