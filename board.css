@@ -2004,3 +2004,31 @@ body.rm-focus-open { overflow: hidden; }
   .roadmapview .rm,
   .rm-focus .rm { min-width: 820px; }
 }
+
+
+/* 2026-09-04 modal reliability and roadmap group editor */
+.confirm-overlay { z-index: 2400 !important; }
+.confirm-overlay-top { z-index: 2600 !important; }
+.modal-overlay { z-index: 2000 !important; }
+.rm-focus-overlay { z-index: 1500 !important; padding: clamp(18px, 3vw, 42px) !important; background: rgba(20,24,30,.58) !important; align-items: center !important; justify-content: center !important; }
+.rm-focus { width: min(96vw,1680px) !important; height: min(92vh,980px) !important; max-width: 1680px !important; max-height: 92vh !important; margin: auto !important; border-radius: 14px !important; box-shadow: 0 24px 70px rgba(0,0,0,.34) !important; overflow: hidden !important; }
+.rm-focus-head { padding-right: 12px; }
+.rf-fields { flex: 0 0 auto; display: grid; grid-template-columns: repeat(4,minmax(150px,1fr)); gap: 10px; padding: 14px 18px; background: #f7f8fa; border-bottom: 1px solid #d9dee3; max-height: 42vh; overflow: auto; }
+.rf-fields[hidden] { display: none !important; }
+.rf-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 10px; font-weight: 750; color: #69727c; text-transform: uppercase; }
+.rf-fields input, .rf-fields textarea { width: 100%; border: 1px solid #cfd5db; border-radius: 7px; padding: 7px 9px; font: inherit; color: #252a30; background: #fff; text-transform: none; }
+.rf-fields label:first-child { grid-column: span 2; }
+.rf-fields #rf-save-fields { align-self: end; min-height: 34px; }
+.rm-focus .rm-focus-timeline-row { display: block !important; grid-template-columns: none !important; }
+.rm-focus .rm-focus-timeline-row > .rm-row-track { width: 100% !important; height: 100%; border-left: 0 !important; }
+.rm-focus .rm-axis-row.rm-focus-timeline-row { border-radius: 10px 10px 0 0; overflow: hidden; }
+.rm-focus .rm-axis-row.rm-focus-timeline-row .rm-axis-track { display: flex; }
+@media (max-width:900px) { .rf-fields { grid-template-columns: repeat(2,minmax(140px,1fr)); } }
+
+
+/* Roadmunk field mapping in Settings */
+.roadmunk-settings { border-left: 4px solid #006b7f; }
+.roadmunk-map-grid { display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 12px; padding: 12px 0; }
+.roadmunk-map-grid label { display: flex; flex-direction: column; gap: 5px; color: #606a73; font-size: 11px; font-weight: 750; }
+.roadmunk-map-grid input { min-height: 36px; border: 1px solid #ccd3da; border-radius: 8px; padding: 7px 10px; font: inherit; color: #252a30; background: #fff; }
+@media (max-width: 760px) { .roadmunk-map-grid { grid-template-columns: 1fr; } }

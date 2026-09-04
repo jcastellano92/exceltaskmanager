@@ -23,6 +23,7 @@
   const MS_TABLE    = "MilestonesTable";
   const KR_TABLE    = "KeyResultsTable";
   const KR_LINK_TABLE = "TaskKeyResultLinksTable";
+  const RG_TABLE = "RoadmapGroupsTable";
   const CFG_SHEET   = "Config";
 
   // Which statuses mean "complete"? Set by the UI from StatusesTable's Bucket
@@ -773,6 +774,93 @@
     });
   }
 
+  // ----- Roadmap groups: group-level Roadmunk metadata, separate from task rows -----
+  async function readRoadmapGroups() {
+    const all = await _readTable(RG_TABLE);
+    return all.filter((r) => String(r.GroupID == null ? "" : r.GroupID).trim() && String(r.Archived || "").toLowerCase() !== "yes");
+  }
+  async function upsertRoadmapGroup(obj) {
+    obj = Object.assign({}, obj || {});
+    const me = await getCurrentUser(), ts = _nowIso();
+    const rows = await _readTable(RG_TABLE);
+    let row = obj.GroupID ? rows.find((r) => String(r.GroupID) === String(obj.GroupID)) : null;
+    if (!row && obj.RoadmunkID) row = rows.find((r) => String(r.RoadmunkID || "") === String(obj.RoadmunkID));
+    if (!row && obj.ExternalID) row = rows.find((r) => String(r.ExternalID || "") === String(obj.ExternalID));
+    if (!row) row = rows.find((r) => String(r.WorkstreamID || "") === String(obj.WorkstreamID || "") && String(r.Name || "").trim().toLowerCase() === String(obj.Name || "").trim().toLowerCase());
+    const fields = ["WorkstreamID","Name","Description","StartDate","EndDate","Progress","BusinessValue","Function","BusinessUnit","Category","XR","Bucket","Source","RoadmunkID","ExternalID","Archived"];
+    const payload = { LastUpdated: ts, UpdatedBy: me.name };
+    fields.forEach((h) => { if (Object.prototype.hasOwnProperty.call(obj, h)) payload[h] = obj[h]; });
+    if (row) { await _updateRowMulti(RG_TABLE, row._rowIndex, payload); return String(row.GroupID); }
+    payload.GroupID = String(obj.GroupID || await _nextPrefixedId(RG_TABLE, "GroupID", "RG", 3));
+    payload.Name = String(payload.Name || "").trim();
+    if (!payload.Name) throw new Error("Roadmap group name is required.");
+    await _appendObjByHeaders(RG_TABLE, payload); return payload.GroupID;
+  }
+  async function deleteRoadmapGroup(groupId) {
+    const idx = await _findRowIndexById(RG_TABLE, "GroupID", groupId);
+    if (idx >= 0) await _deleteRow(RG_TABLE, idx);
+  }
+  async function importRoadmapGroups(items) {
+    items = Array.isArray(items) ? items.filter((x) => String(x && x.Name || "").trim()) : [];
+    if (!items.length) return [];
+    const me = await getCurrentUser(), ts = _nowIso();
+    return Excel.run(async (ctx) => {
+      const tbl = ctx.workbook.tables.getItem(RG_TABLE), header = tbl.getHeaderRowRange(), body = tbl.getDataBodyRange();
+      header.load("values"); body.load("values"); await ctx.sync();
+      const headers = header.values[0], rows = (body.values || []).map((r) => r.slice()), additions = [], ids = [];
+      const col = (name) => headers.indexOf(name);
+      const read = (row, name) => { const i = col(name); return i < 0 ? "" : row[i]; };
+      let maxId = 0;
+      rows.forEach((row) => { const m = String(read(row, "GroupID") || "").match(/^RG(\d+)$/i); if (m) maxId = Math.max(maxId, Number(m[1]) || 0); });
+      const fields = ["WorkstreamID","Name","Description","StartDate","EndDate","Progress","BusinessValue","Function","BusinessUnit","Category","XR","Bucket","Source","RoadmunkID","ExternalID","Archived"];
+      const findIndex = (item) => {
+        if (item.GroupID) { const i = rows.findIndex((r) => String(read(r,"GroupID")) === String(item.GroupID)); if (i >= 0) return i; }
+        if (item.RoadmunkID) { const i = rows.findIndex((r) => String(read(r,"RoadmunkID")) === String(item.RoadmunkID)); if (i >= 0) return i; }
+        if (item.ExternalID) { const i = rows.findIndex((r) => String(read(r,"ExternalID")) === String(item.ExternalID)); if (i >= 0) return i; }
+        const i = rows.findIndex((r) => String(read(r,"WorkstreamID")) === String(item.WorkstreamID || "") && String(read(r,"Name") || "").trim().toLowerCase() === String(item.Name || "").trim().toLowerCase());
+        if (i >= 0) return i;
+        const sameName = rows.map((r, idx) => ({ idx, same: String(read(r,"Name") || "").trim().toLowerCase() === String(item.Name || "").trim().toLowerCase() })).filter((x) => x.same);
+        return sameName.length === 1 ? sameName[0].idx : -1;
+      };
+      items.forEach((item) => {
+        const rowIndex = findIndex(item), payload = { LastUpdated: ts, UpdatedBy: me.name };
+        fields.forEach((h) => { if (Object.prototype.hasOwnProperty.call(item, h)) payload[h] = item[h]; });
+        if (rowIndex >= 0) {
+          ids.push(String(read(rows[rowIndex], "GroupID")));
+          headers.forEach((h, ci) => { if (Object.prototype.hasOwnProperty.call(payload, h)) { body.getCell(rowIndex, ci).values = [[payload[h]]]; rows[rowIndex][ci] = payload[h]; } });
+        } else {
+          const id = String(item.GroupID || ("RG" + String(++maxId).padStart(3, "0"))); ids.push(id); payload.GroupID = id;
+          const row = headers.map((h) => Object.prototype.hasOwnProperty.call(payload, h) ? payload[h] : ""); additions.push(row); rows.push(row);
+        }
+      });
+      if (additions.length) tbl.rows.add(null, additions);
+      await ctx.sync(); return ids;
+    });
+  }
+
+  // One workbook sync for all changed/new subtasks makes task saves noticeably faster.
+  async function saveSubtasksBatch(parentTaskId, rows, taskDone) {
+    rows = Array.isArray(rows) ? rows : [];
+    const me = await getCurrentUser(), ts = _nowIso(), today = _nowIso().slice(0, 10);
+    return Excel.run(async (ctx) => {
+      const tbl = ctx.workbook.tables.getItem(SUB_TABLE), header = tbl.getHeaderRowRange(), body = tbl.getDataBodyRange();
+      header.load("values"); body.load("values"); await ctx.sync();
+      const headers = header.values[0], idIdx = headers.indexOf("SubtaskID"), parentIdx = headers.indexOf("ParentTaskID");
+      let maxId = 0; const existing = new Map(), additions = [];
+      body.values.forEach((r, i) => { const id = Number(r[idIdx]); if (!isNaN(id)) maxId = Math.max(maxId, id); if (String(r[parentIdx]) === String(parentTaskId)) existing.set(String(r[idIdx]), i); });
+      rows.forEach((item, index) => {
+        if (!String(item.Text || "").trim()) return;
+        const done = taskDone ? "Yes" : (item.Done || "No");
+        const obj = { SubtaskID: item.SubtaskID || ++maxId, ParentTaskID: parentTaskId, Text: item.Text || "", Done: done, Order: item.Order || index + 1, DueDate: item.DueDate || "", Owner: item.Owner || "", CompletedDate: done === "Yes" ? (item.CompletedDate || today) : "", LastUpdated: ts, UpdatedBy: me.name };
+        const ri = item.SubtaskID ? existing.get(String(item.SubtaskID)) : null;
+        if (ri == null) additions.push(headers.map((h) => Object.prototype.hasOwnProperty.call(obj, h) ? obj[h] : ""));
+        else headers.forEach((h, ci) => { if (h !== "SubtaskID" && h !== "ParentTaskID" && Object.prototype.hasOwnProperty.call(obj, h)) body.getCell(ri, ci).values = [[obj[h]]]; });
+      });
+      if (additions.length) tbl.rows.add(null, additions);
+      await ctx.sync(); return rows.length;
+    });
+  }
+
   // ----- Workstreams / Goals (tasks link by ID; renaming Name auto-propagates) -----
   // These log meaningful create/update/delete activity (not trivial UI actions).
   async function createWorkstream(obj) {
@@ -942,6 +1030,7 @@
     countTasksByField, countTasksByWorkstream, countTasksByGoal,
     renameOwner, renameQuarter, renameStatus, setStatusColor, setStatusOrder, updateStatusRow, addTableColumns, setCompleteStatuses,
     createWorkstream, updateWorkstream, deleteWorkstream,
+    readRoadmapGroups, upsertRoadmapGroup, deleteRoadmapGroup, importRoadmapGroups, saveSubtasksBatch,
     createGoal, updateGoal, deleteGoal,
     createKeyResult, updateKeyResult, archiveKeyResult,
     syncTaskKeyResultLinks, updateTaskKeyResultLink,

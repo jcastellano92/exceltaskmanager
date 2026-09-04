@@ -1,11 +1,20 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" xmlns:mso="urn:schemas-microsoft-com:office:office" xmlns:msdt="uuid:C2F41010-65B3-11d1-A29F-00AA00C14882">
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <title>Product Management Tool</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-  <link rel="stylesheet" href="taskpane.css" />
+  <link rel="stylesheet" href="taskpane.css?v=20260701f" />
+
+<!--[if gte mso 9]><xml>
+<mso:CustomDocumentProperties>
+<mso:docLang msdt:dt="string">en</mso:docLang>
+</mso:CustomDocumentProperties>
+</xml><![endif]-->
 </head>
 <body>
   <div class="panel">
@@ -14,45 +23,30 @@
         <div class="logo-dot"></div>
         <h1>Product Management Tool</h1>
       </div>
-      <p class="tagline">Task board for your team.</p>
+      <p class="tagline">Full-screen task board for your team.</p>
     </header>
 
     <section class="panel-body">
-      <button id="open-board-btn" class="btn btn-primary btn-block">
-        🗂️ Open Task Board
-      </button>
+      <button id="open-fs-btn" class="btn btn-primary btn-block">⛶ Open Full-Screen Board</button>
 
       <div class="sync-row">
         <div class="sync-status">
           <span class="dot dot-green" id="sync-dot"></span>
           <span id="sync-text">Ready</span>
         </div>
-        <button id="sync-now-btn" class="btn btn-secondary btn-sm">Sync Now</button>
-      </div>
-
-      <div class="last-sync">
-        Last sync: <span id="last-sync-time">—</span>
-      </div>
-
-      <hr />
-
-      <div class="quick-stats">
-        <h3>Quick Stats</h3>
-        <div class="stat-row"><span>Total Tasks</span><strong id="stat-total">—</strong></div>
-        <div class="stat-row"><span>My Tasks</span><strong id="stat-mine">—</strong></div>
-        <div class="stat-row"><span>Blocked</span><strong id="stat-blocked">—</strong></div>
-        <div class="stat-row"><span>Done This Q</span><strong id="stat-done">—</strong></div>
       </div>
 
       <hr />
 
       <div class="footer-help">
-        <p><strong>Tip:</strong> The board opens in a large dialog. You can keep this side panel docked for quick stats.</p>
+        <p><strong>Keep this panel open.</strong> The board opens as a full-screen
+        panel inside Excel and talks to the workbook <em>through</em> this sidebar,
+        so don't close it while the board is open.</p>
       </div>
     </section>
   </div>
 
-  <script src="data.js"></script>
-  <script src="taskpane.js"></script>
+  <script src="data.js?v=20260904roadmunkmap"></script>
+  <script src="taskpane-dialog.js?v=20260904roadmunkmap"></script>
 </body>
 </html>
