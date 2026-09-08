@@ -11,7 +11,7 @@
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
   <!-- Self-hosted (a CDN reference here gets blocked on locked-down corporate networks, which silently kills drag-and-drop). -->
   <script src="sortable.min.js?v=20260701f"></script>
-  <link rel="stylesheet" href="board.css?v=20260904roadmunkmap" />
+  <link rel="stylesheet" href="board.css?v=20260908final" />
 
 <!--[if gte mso 9]><xml>
 <mso:CustomDocumentProperties>
@@ -43,15 +43,19 @@
         ⚙ Filters <span id="filter-count" class="filter-count" hidden>0</span>
       </button>
       <div id="filter-panel" class="filter-panel" hidden>
-        <div class="fp-row"><label>Owner</label>
+        <div class="fp-section-title">People</div><div class="fp-row fp-people"><label>Owner</label>
           <select id="filter-owner" class="filter"><option value="">All Owners</option></select></div>
         <div class="fp-row"><label title="Anyone attached: owner, contributor, or a subtask assignee">Contributor</label>
           <select id="filter-contributor" class="filter"><option value="">Anyone</option></select></div>
-        <div class="fp-row"><label>Workstream</label>
+        <div class="fp-section-title">Work structure</div><div class="fp-row fp-work"><label>Workstream</label>
           <select id="filter-workstream" class="filter"><option value="">All Workstreams</option></select></div>
-        <div class="fp-row"><label>Quarter</label>
+        <div class="fp-row fp-work"><label>Workstream group</label>
+          <select id="filter-wsgroup" class="filter"><option value="">All workstream groups</option></select></div>
+        <div class="fp-row fp-metadata"><label>Workstream resource</label>
+          <select id="filter-resource" class="filter"><option value="">Any resource</option></select></div>
+        <div class="fp-row fp-schedule"><label>Quarter</label>
           <select id="filter-quarter" class="filter"><option value="">All Quarters</option></select></div>
-        <div class="fp-row"><label>Status</label>
+        <div class="fp-section-title">Status and health</div><div class="fp-row fp-status"><label>Status</label>
           <select id="filter-status" class="filter"><option value="">All Statuses</option></select></div>
         <div class="fp-row"><label>Goal</label>
           <select id="filter-goal" class="filter"><option value="">All Goals</option></select></div>
@@ -64,7 +68,7 @@
             <option value="At Risk">🟡 At Risk</option>
             <option value="Off Track">🔴 Off Track</option>
           </select></div>
-        <div class="fp-row"><label>Start date</label>
+        <div class="fp-section-title">Schedule and metadata</div><div class="fp-row fp-schedule"><label>Start date</label>
           <div class="fp-daterange">
             <input type="date" id="filter-start-from" class="filter" title="Start on/after" />
             <span class="fp-dash">–</span>
@@ -326,6 +330,7 @@
 
     <footer class="modal-footer">
       <button class="btn btn-archive" id="m-archive">Archive</button>
+      <div class="modal-save-context"><button class="btn btn-secondary" id="m-ai" type="button" title="Copy a context-aware prompt for description, subtasks, risks, WSJF, or updates">✨ Copilot</button><span id="m-draft-state">Changes are saved when you choose Save.</span></div>
       <div class="footer-right">
         <button class="btn btn-secondary" id="m-cancel">Cancel</button>
         <button class="btn btn-primary" id="m-save">Save</button>
@@ -337,7 +342,7 @@
 <!-- toasts -->
 <div id="toast-host" class="toast-host"></div>
 
-<script src="data.js?v=20260904roadmunkmap"></script>
-<script src="board.js?v=20260904roadmunkmap"></script>
+<script src="data.js?v=20260908final"></script>
+<script src="board.js?v=20260908final"></script>
 </body>
 </html>

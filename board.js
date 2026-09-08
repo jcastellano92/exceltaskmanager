@@ -58,6 +58,10 @@
     expandedKeyResults: new Set(),
     workstreams: [],
     roadmapGroups: [],
+    people: [],
+    personWorkstreams: [],
+    workstreamLinks: [],
+    workstreamDocuments: [],
     view: "all",                         // always show all tasks; narrow with the filters
     viewMode: "mine",                    // default landing = My Tasks. "board" | "list" | "mine" | "ws" | "config"
     wsQuarter: "",                       // focused quarter on the Workstreams dashboard
@@ -66,13 +70,13 @@
     expandedSubtasks: new Set(),         // taskIds whose subtask checklist is expanded inline (board + list)
     milestones: [],                      // standalone roadmap milestone lines (MilestonesTable)
     allUpdates: [],                      // every Updates row (for the My Tasks "recent updates" feed)
-    roadmap: { showDates: true, expanded: new Set(), group: "", selected: new Set(), focus: null }, // roadmap prefs + Ctrl-selected taskIds + open group focus {wid,name}
+    roadmap: { showDates: true, expanded: new Set(), focusExpanded: new Set(), group: "", selected: new Set(), focus: null }, // roadmap prefs + Ctrl-selected taskIds + open group focus {wid,name}
     selected: new Set(),                 // taskIds selected in List view for bulk actions
     sort: "wsjf",                        // board column sort: "wsjf" | "due" | "manual"
     groupBy: "",                         // List view grouping: "" | WorkstreamID | Owner | Quarter | Status | GoalID
     listSort: { key: "WSJF", dir: "desc" }, // list view column sort
     listColFilters: {},                  // per-column filters (Sheets-style): key -> Set of allowed display values
-    filters: { owner: "", contributor: "", workstream: "", quarter: "", status: "", goal: "", rgroup: "", health: "", subtasks: "",
+    filters: { owner: "", contributor: "", workstream: "", quarter: "", status: "", goal: "", rgroup: "", wsGroup: "", resource: "", health: "", subtasks: "",
                startFrom: "", startTo: "", dueFrom: "", dueTo: "", tags: new Set(), search: "" },
     selectedTags: new Set(),
     modalOpen: false,
@@ -155,7 +159,9 @@
       "createGoal", "updateGoal", "deleteGoal",
       "createKeyResult", "updateKeyResult", "archiveKeyResult", "syncTaskKeyResultLinks", "updateTaskKeyResultLink", "logActivity",
       "createMilestone", "updateMilestone", "deleteMilestone",
-      "readRoadmapGroups", "upsertRoadmapGroup", "deleteRoadmapGroup", "importRoadmapGroups", "saveSubtasksBatch"
+      "readRoadmapGroups", "upsertRoadmapGroup", "deleteRoadmapGroup", "importRoadmapGroups", "saveSubtasksBatch",
+      "readPeople", "readPersonWorkstreams", "upsertPerson", "upsertPersonWorkstream", "deletePersonWorkstream",
+      "readWorkstreamLinks", "readWorkstreamDocuments", "upsertWorkstreamLink", "deleteWorkstreamLink", "upsertWorkstreamDocument", "deleteWorkstreamDocument"
     ];
     const api = {};
     methods.forEach((m) => {
@@ -170,6 +176,16 @@
   // can overload the Excel API and return 500s — which is what makes a dropped
   // card "pop back" to where it was. One-write-at-a-time fixes that, and the
   // pendingWrites/lastWriteTs counters let polling defer while writes are active.
+  function ensureSavingOverlay() {
+    let host = document.getElementById("global-saving-overlay");
+    if (!host) { host = document.createElement("div"); host.id = "global-saving-overlay"; host.className = "global-saving-overlay"; host.hidden = true; host.innerHTML = '<div class="global-saving-card"><span class="saving-spinner"></span><div><strong id="global-saving-title">Saving changes</strong><small id="global-saving-detail">Please keep this window open.</small></div></div>'; document.body.appendChild(host); }
+    return host;
+  }
+  function updateSavingOverlay(label, state) {
+    const host = ensureSavingOverlay(), title = host.querySelector("#global-saving-title"), detail = host.querySelector("#global-saving-detail");
+    if (state === "start") { host.hidden = false; host.classList.remove("saved","failed"); title.textContent = label || "Saving changes"; detail.textContent = "Please keep this window open."; }
+    else { host.classList.add(state === "error" ? "failed" : "saved"); title.textContent = state === "error" ? "Save failed" : "Changes saved"; detail.textContent = state === "error" ? String(label || "Review the error and try again.") : "Your workbook is up to date."; setTimeout(() => { if (State.pendingWrites === 0) host.hidden = true; }, state === "error" ? 2200 : 700); }
+  }
   function installWriteQueue() {
     const mutating = [
       "writeTask", "writeTaskStatus", "setTaskRoadmapGroup", "createTask", "archiveTask",
@@ -180,7 +196,9 @@
       "createWorkstream", "updateWorkstream", "deleteWorkstream",
       "createGoal", "updateGoal", "deleteGoal", "createKeyResult", "updateKeyResult", "archiveKeyResult", "syncTaskKeyResultLinks", "updateTaskKeyResultLink",
       "createMilestone", "updateMilestone", "deleteMilestone",
-      "upsertRoadmapGroup", "deleteRoadmapGroup", "importRoadmapGroups", "saveSubtasksBatch"
+      "upsertRoadmapGroup", "deleteRoadmapGroup", "importRoadmapGroups", "saveSubtasksBatch",
+      "upsertPerson", "upsertPersonWorkstream", "deletePersonWorkstream",
+      "upsertWorkstreamLink", "deleteWorkstreamLink", "upsertWorkstreamDocument", "deleteWorkstreamDocument"
     ];
     let chain = Promise.resolve();
     mutating.forEach((m) => {
@@ -189,11 +207,12 @@
       window.WsjfData[m] = function () {
         const args = arguments;
         State.pendingWrites++;
+        updateSavingOverlay("Saving " + m.replace(/([A-Z])/g, " $1").toLowerCase(), "start");
         const run = chain.then(() => orig.apply(window.WsjfData, args));
         chain = run.then(function () {}, function () {});   // keep the queue alive on error
         run.then(
-          function () { State.pendingWrites--; State.lastWriteTs = Date.now(); },
-          function () { State.pendingWrites--; State.lastWriteTs = Date.now(); }
+          function () { State.pendingWrites--; State.lastWriteTs = Date.now(); if (State.pendingWrites === 0) updateSavingOverlay("", "success"); },
+          function (err) { State.pendingWrites--; State.lastWriteTs = Date.now(); if (State.pendingWrites === 0) updateSavingOverlay(err && err.message, "error"); }
         );
         return run;
       };
@@ -223,7 +242,7 @@
         optional: ["StartDate", "Contributors", "GoalID", "Tags", "Health", "Slips"] },
       { name: "WorkstreamsTable", sample: State.workstreams[0],
         critical: ["WorkstreamID", "Name"], optional: ["Owner", "Status", "Goals", "Quarters", "Metric1", "Group"] },
-      { name: "RoadmapGroupsTable", sample: State.roadmapGroups[0], critical: ["GroupID", "Name"], optional: ["WorkstreamID", "Description", "StartDate", "EndDate", "Progress", "BusinessValue", "Function", "BusinessUnit", "Category", "XR", "Bucket", "Source", "RoadmunkID", "ExternalID", "Archived", "LastUpdated", "UpdatedBy"] },
+      { name: "RoadmapGroupsTable", sample: State.roadmapGroups[0], critical: ["GroupID", "Name"], optional: ["WorkstreamID", "Description", "StartDate", "EndDate", "Progress", "BusinessValue", "Function", "BusinessUnit", "Category", "XR", "Bucket", "Source", "RoadmunkID", "ExternalID", "SortOrder", "Archived", "LastUpdated", "UpdatedBy"] },
       { name: "GoalsTable", sample: State.goals[0], critical: ["GoalID"], optional: ["ShortName", "GoalName"] },
       { name: "KeyResultsTable", sample: State.keyResults[0],
         critical: ["KeyResultID", "GoalID", "KeyResultName", "ManualPercent", "CalculationMode", "Weight", "Archived"],
@@ -277,6 +296,10 @@
     State.archivedTasks = archivedTasks.filter((t) => String(t.TaskID == null ? "" : t.TaskID).trim() !== "");
     State.allAttachments = allAttachments;
     State.workstreams = workstreams;
+    try { State.people = await window.WsjfData.readPeople(); State.personWorkstreams = await window.WsjfData.readPersonWorkstreams(); }
+    catch (e) { State.people = []; State.personWorkstreams = []; console.warn("People directory unavailable:", e.message); }
+    try { State.workstreamLinks = await window.WsjfData.readWorkstreamLinks(); State.workstreamDocuments = await window.WsjfData.readWorkstreamDocuments(); }
+    catch (e) { State.workstreamLinks = []; State.workstreamDocuments = []; console.warn("Workstream resources unavailable:", e.message); }
     try { State.roadmapGroups = await window.WsjfData.readRoadmapGroups(); }
     catch (e) { State.roadmapGroups = []; console.warn("RoadmapGroupsTable unavailable:", e.message); }
 
@@ -382,6 +405,9 @@
     );
     const allGroups = Array.from(new Set(State.tasks.map(taskRoadmapGroup).filter(Boolean))).sort();
     fillSelect("filter-rgroup", ["", ...allGroups], "All Groups", State.filters.rgroup);
+    fillSelect("filter-wsgroup", ["", ...Array.from(new Set(State.workstreams.map((w) => String(w.Group || "Other"))))], "All workstream groups", State.filters.wsGroup);
+    const resourceTypes = Array.from(new Set(State.workstreamLinks.map((x) => x.LinkType).concat(State.workstreamDocuments.map((x) => x.DocumentType)).filter(Boolean))).sort();
+    fillSelect("filter-resource", [{value:"",label:"Any resource"},{value:"any",label:"Has any resource"}].concat(resourceTypes.map((x)=>({value:x,label:x}))), "Any resource", State.filters.resource);
   }
 
   async function reloadTasks() {
@@ -1054,7 +1080,7 @@
       const meta = document.createElement("span");
       meta.className = "sa-meta";
       const bits = [];
-      if (s.Owner) bits.push('<span class="sa-avatar" style="background:' + colorHash(s.Owner) + '" title="' + escapeAttr(s.Owner) + '">' + initialsFromName(s.Owner) + '</span>');
+      if (s.Owner) bits.push('<span class="sa-avatar" style="background:' + colorHash(s.Owner) + '" title="' + escapeAttr(personCardText(s.Owner)) + '">' + initialsFromName(s.Owner) + '</span>');
       if (s.DueDate) {
         const overdue = !cb.checked && isoDate(s.DueDate) && isoDate(s.DueDate) < new Date().toISOString().slice(0, 10);
         bits.push('<span class="sa-due' + (overdue ? " overdue" : "") + '">📅 ' + escapeHtml(formatDateShort(s.DueDate)) + '</span>');
@@ -1351,6 +1377,14 @@
     }
     html += '</tbody></table>';
     root.innerHTML = html;
+
+    const importBtn = root.querySelector("#rm-import-groups"), importFile = root.querySelector("#rm-import-file");
+    if (importBtn && importFile) {
+      importBtn.addEventListener("click", () => importFile.click());
+      importFile.addEventListener("change", () => { importRoadmapGroupsFile(importFile.files[0]); importFile.value = ""; });
+    }
+    const exportBtn = root.querySelector("#rm-export-groups");
+    if (exportBtn) exportBtn.addEventListener("click", () => exportRoadmapGroups());
 
     Array.from(root.querySelectorAll(".sel-row")).forEach((cb) => {
       cb.addEventListener("click", (e) => e.stopPropagation());
@@ -2166,6 +2200,11 @@
 
     const single = groups.length === 1 && groups[0].name === "Workstreams";
     groups.forEach((g) => root.appendChild(renderWsGroup(g, single)));
+    root.querySelectorAll("[data-workstream-id], [data-wid]").forEach((card) => {
+      const wid = card.dataset.workstreamId || card.dataset.wid; if (!wid || card.querySelector(".ws-resource-strip")) return;
+      const resources = linksForWorkstream(wid).concat(documentsForWorkstream(wid)); if (!resources.length) return;
+      const strip=document.createElement("div");strip.className="ws-resource-strip";strip.innerHTML=resources.slice(0,6).map((x)=>'<a href="'+escapeAttr(x.Url)+'" target="_blank" rel="noopener" title="'+escapeAttr(x.Description||x.Label||'Resource')+'">'+resourceIcon(x.LinkType||x.DocumentType)+' '+escapeHtml(x.Label||x.LinkType||x.DocumentType)+'</a>').join('');card.appendChild(strip);
+    });
   }
 
   // Collapsible group of workstream cards. Default closed; remembers last state.
@@ -2704,13 +2743,11 @@
         '<button class="btn btn-secondary btn-sm" id="rm-import-groups">Import groups</button>' +
         '<button class="btn btn-secondary btn-sm" id="rm-export-groups">Export groups</button>' +
         '<input id="rm-import-file" type="file" accept=".csv,text/csv" hidden>' +
+        (State.workstreamLinks.some((x) => String(x.LinkType).toLowerCase() === "roadmunk") ? '<div class="rm-roadmunk-links">' + State.workstreamLinks.filter((x) => String(x.LinkType).toLowerCase() === "roadmunk").slice(0,4).map((x) => '<a class="btn btn-secondary btn-sm" href="' + escapeAttr(x.Url) + '" target="_blank" rel="noopener">Roadmunk · ' + escapeHtml(workstreamName(x.WorkstreamID) || x.Label) + '</a>').join("") + '</div>' : '') +
         '<span class="mine-who">' + escapeHtml(yearStart.slice(0, 4)) + '</span>' +
       '</div></div>';
 
-    const importBtn = document.getElementById("rm-import-groups"), importFile = document.getElementById("rm-import-file");
-    if (importBtn && importFile) { importBtn.addEventListener("click", () => importFile.click()); importFile.addEventListener("change", () => { importRoadmapGroupsFile(importFile.files[0]); importFile.value = ""; }); }
-    const exportBtn = document.getElementById("rm-export-groups"); if (exportBtn) exportBtn.addEventListener("click", () => exportRoadmapGroups());
-    // Group tabs.
+    // Group tabs are appended before controls are wired.
     if (groups.length > 1) {
       html += '<div class="rm-tabs">' + groups.map((g) =>
         '<button type="button" class="rm-tab' + (g === sel ? " active" : "") + '" data-rm-group="' + escapeAttr(g) + '">' +
@@ -2793,10 +2830,18 @@
     // A roadmap group is collapsed into one bar (min start → max end); click to focus.
     const groupBarEl = (g) => {
       const left = pctOf(g.s), width = Math.max(2.5, pctOf(g.e) - left);
-      return '<div class="rm-bar rm-groupbar" style="left:' + left + '%;width:' + width + '%" data-rg-group="' + escapeAttr(g.name) + '" data-rg-wid="' + escapeAttr(g.wid) + '" title="' + escapeAttr("Group: " + g.name + " · " + g.tasks.length + " items · " + g.tasks.map((t) => t.Title).slice(0, 5).join("; ") + " — click to open") + '">' +
+      const counts = {};
+      g.tasks.forEach((t) => { const key = String(t.Status || "Unspecified"); counts[key] = (counts[key] || 0) + 1; });
+      const composition = boardColumns().filter((s) => counts[s]).map((s) =>
+        '<span class="rm-group-status" style="--status-color:' + escapeAttr(statusColor(s)) + '" title="' + escapeAttr(s + ': ' + counts[s]) + '"><i></i><b>' + counts[s] + '</b></span>').join("");
+      return '<div class="rm-bar rm-groupbar" style="left:' + left + '%;width:' + width + '%" data-rg-group="' + escapeAttr(g.name) + '" data-rg-wid="' + escapeAttr(g.wid) + '" data-rg-start="' + escapeAttr(g.s) + '" data-rg-end="' + escapeAttr(g.e) + '" data-rg-min="' + escapeAttr(g.contentS) + '" data-rg-max="' + escapeAttr(g.contentE) + '" title="' + escapeAttr("Group: " + g.name + " · " + g.tasks.length + " items · click to open") + '">' +
+        '<span class="rm-group-handle rm-group-handle-l" data-rg-grip="l"></span>' +
+        '<button class="rm-group-order" type="button" draggable="true" title="Drag to reorder within this workstream">⠿</button>' +
         '<span class="rm-groupbar-icon">▦</span>' +
         '<span class="rm-bar-label">' + escapeHtml(g.name) + ' (' + g.tasks.length + ')</span>' +
-        '<span class="rm-groupbar-open">⤢</span></div>';
+        '<span class="rm-group-composition">' + composition + '</span>' +
+        '<span class="rm-groupbar-open">⤢</span>' +
+        '<span class="rm-group-handle rm-group-handle-r" data-rg-grip="r"></span></div>';
     };
 
     // Subtask rows for an expanded task — each a labelled mini-bar (parent start → due).
@@ -2818,7 +2863,7 @@
         }).join("");
     };
 
-    laneIds.forEach((wid) => {
+    laneIds.forEach((wid, laneIndex) => {
       const tasks = visible.filter((t) => t.WorkstreamID === wid)
         .sort((a, b) => { const ra = rng(a).s, rb = rng(b).s; return ra < rb ? -1 : ra > rb ? 1 : 0; });
       if (!tasks.length) return;
@@ -2834,12 +2879,18 @@
       const items = [];
       ungrouped.forEach((t) => { const r = rng(t); items.push({ kind: "task", t: t, s: r.s, e: r.e }); });
       Object.keys(groupedMap).forEach((name) => {
-        const gts = groupedMap[name];
-        let s = null, e = null;
-        gts.forEach((t) => { const r = rng(t); if (s === null || r.s < s) s = r.s; if (e === null || r.e > e) e = r.e; });
-        items.push({ kind: "group", name: name, wid: wid, tasks: gts, s: s, e: e });
+        const gts = groupedMap[name], meta = roadmapGroupRecord(wid, name);
+        let contentS = null, contentE = null;
+        gts.forEach((t) => { const r = rng(t); if (contentS === null || r.s < contentS) contentS = r.s; if (contentE === null || r.e > contentE) contentE = r.e; });
+        const metaS = meta && isoDate(meta.StartDate), metaE = meta && isoDate(meta.EndDate);
+        const s = metaS && metaS < contentS ? metaS : contentS;
+        const e = metaE && metaE > contentE ? metaE : contentE;
+        items.push({ kind: "group", name: name, wid: wid, tasks: gts, meta: meta, contentS: contentS, contentE: contentE, s: s, e: e, order: Number(meta && meta.SortOrder) || 9999 });
       });
-      items.sort((a, b) => (a.s < b.s ? -1 : a.s > b.s ? 1 : 0));
+      items.sort((a, b) => {
+        if (a.kind === "group" && b.kind === "group" && a.order !== b.order) return a.order - b.order;
+        return a.s < b.s ? -1 : a.s > b.s ? 1 : 0;
+      });
       const packed = packItems(items);
 
       const rowsHtml = packed.map((rowItems) => {
@@ -2848,7 +2899,7 @@
           .map((it) => '<div class="rm-subgroup" style="--parent-left:' + pctOf(rng(it.t).s) + '%">' + subtaskRowsHtml(it.t) + '</div>').join("");
         return row + children;
       }).join("");
-      html += '<div class="rm-wslane">' +
+      html += '<div class="rm-wslane ' + (laneIndex % 2 ? 'rm-wslane-alt' : 'rm-wslane-base') + '">' +
         '<div class="rm-wslabel" title="' + escapeAttr(workstreamName(wid)) + '">' +
           '<span class="rm-wsname">' + escapeHtml(workstreamName(wid) || "No workstream") + '</span>' +
           (owner ? '<span class="rm-wsowner">👤 ' + escapeHtml(owner) + '</span>' : '') +
@@ -2925,9 +2976,50 @@
       wireRoadmapHover(bar, task);
       wireRoadmapDrag(bar, task, { pctOf: pctOf, isoFromPct: isoFromPct });
     });
-    // Group bars → open focus mode.
+    // Groups use a metadata envelope. It may extend beyond members but never exclude them.
+    let draggedGroup = null;
     Array.from(root.querySelectorAll(".rm-groupbar[data-rg-group]")).forEach((gb) => {
-      gb.addEventListener("click", () => openGroupFocus(gb.dataset.rgWid, gb.dataset.rgGroup));
+      gb.addEventListener("click", (e) => { if (!e.target.closest(".rm-group-order,.rm-group-handle")) openGroupFocus(gb.dataset.rgWid, gb.dataset.rgGroup); });
+      const orderHandle = gb.querySelector(".rm-group-order");
+      orderHandle.addEventListener("dragstart", (e) => { draggedGroup = gb; e.dataTransfer.effectAllowed = "move"; e.stopPropagation(); });
+      gb.addEventListener("dragover", (e) => { if (draggedGroup && draggedGroup.dataset.rgWid === gb.dataset.rgWid) { e.preventDefault(); gb.classList.add("rm-group-drop"); } });
+      gb.addEventListener("dragleave", () => gb.classList.remove("rm-group-drop"));
+      gb.addEventListener("drop", async (e) => {
+        e.preventDefault(); gb.classList.remove("rm-group-drop");
+        if (!draggedGroup || draggedGroup === gb || draggedGroup.dataset.rgWid !== gb.dataset.rgWid) return;
+        const laneBars = Array.from(root.querySelectorAll('.rm-groupbar[data-rg-wid="' + CSS.escape(gb.dataset.rgWid) + '"]'));
+        const names = laneBars.map((x) => x.dataset.rgGroup);
+        const from = names.indexOf(draggedGroup.dataset.rgGroup), to = names.indexOf(gb.dataset.rgGroup);
+        names.splice(to, 0, names.splice(from, 1)[0]);
+        await Promise.all(names.map((name, index) => {
+          const meta = roadmapGroupRecord(gb.dataset.rgWid, name) || { WorkstreamID: gb.dataset.rgWid, Name: name };
+          return window.WsjfData.upsertRoadmapGroup(Object.assign({}, meta, { SortOrder: index + 1 }));
+        }));
+        State.roadmapGroups = await window.WsjfData.readRoadmapGroups(); draggedGroup = null; renderRoadmap();
+      });
+      gb.addEventListener("dragend", () => { draggedGroup = null; root.querySelectorAll(".rm-group-drop").forEach((x) => x.classList.remove("rm-group-drop")); });
+      gb.querySelectorAll(".rm-group-handle").forEach((handle) => handle.addEventListener("pointerdown", (ev) => {
+        ev.preventDefault(); ev.stopPropagation();
+        const trackW = gb.parentElement.getBoundingClientRect().width, startX = ev.clientX;
+        const left0 = parseFloat(gb.style.left) || 0, width0 = parseFloat(gb.style.width) || 1;
+        const minPct = pctOf(gb.dataset.rgMin), maxPct = pctOf(gb.dataset.rgMax);
+        const side = handle.dataset.rgGrip; let finalLeft = left0, finalWidth = width0, constrained = false;
+        const move = (e) => {
+          const delta = ((e.clientX - startX) / trackW) * 100; constrained = false;
+          if (side === "l") { finalLeft = Math.max(0, Math.min(minPct, left0 + delta)); finalWidth = left0 + width0 - finalLeft; if (left0 + delta > minPct) constrained = true; }
+          else { const requested = Math.max(1, Math.min(100 - left0, width0 + delta)); finalWidth = Math.max(maxPct - left0, requested); finalLeft = left0; if (left0 + requested < maxPct) constrained = true; }
+          gb.style.left = finalLeft + "%"; gb.style.width = finalWidth + "%"; gb.classList.toggle("rm-group-constrained", constrained);
+          const tip = root.querySelector("#rm-dragtip"); if (tip) { tip.hidden = false; tip.textContent = constrained ? "Limited by a task date" : formatDateShort(isoFromPct(finalLeft)) + " – " + formatDateShort(isoFromPct(finalLeft + finalWidth)); tip.style.left = Math.min(e.clientX + 12, window.innerWidth - 180) + "px"; tip.style.top = Math.max(8, e.clientY - 38) + "px"; }
+        };
+        const up = async () => {
+          document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
+          const tip = root.querySelector("#rm-dragtip"); if (tip) tip.hidden = true;
+          const meta = roadmapGroupRecord(gb.dataset.rgWid, gb.dataset.rgGroup) || { WorkstreamID: gb.dataset.rgWid, Name: gb.dataset.rgGroup };
+          await window.WsjfData.upsertRoadmapGroup(Object.assign({}, meta, { StartDate: isoFromPct(finalLeft), EndDate: isoFromPct(finalLeft + finalWidth) }));
+          State.roadmapGroups = await window.WsjfData.readRoadmapGroups(); renderRoadmap();
+        };
+        document.addEventListener("pointermove", move); document.addEventListener("pointerup", up, { once: true });
+      }));
     });
     // Selection action bar.
     const selGroupBtn = document.getElementById("rm-sel-group");
@@ -2952,6 +3044,12 @@
     toast("Grouping " + tasks.length + "…", "info");
     try {
       await window.WsjfData.setTaskRoadmapGroup(tasks.map((t) => t.TaskID), name);
+      const ranges = tasks.map((t) => {
+        let s = isoDate(t.StartDate), e = isoDate(t.DueDate), q = State.quarterDates[t.Quarter];
+        if (!s) s = q ? isoDate(q.start) : e; if (!e) e = q ? isoDate(q.end) : s; return { s: s, e: e };
+      }).filter((r) => r.s && r.e);
+      await window.WsjfData.upsertRoadmapGroup({ WorkstreamID: wid, Name: name, StartDate: ranges.map((r) => r.s).sort()[0] || "", EndDate: ranges.map((r) => r.e).sort().slice(-1)[0] || "", SortOrder: 9999, Source: "Product Management Tool" });
+      State.roadmapGroups = await window.WsjfData.readRoadmapGroups();
       State.roadmap.selected.clear();
       await reloadTasks();
       renderRoadmap();
@@ -3157,51 +3255,48 @@
       return { s: s, e: e };
     };
     const usedStatuses = boardColumns();
-    const legend = usedStatuses.map((s) => '<span class="rm-leg"><i style="background:' + statusColor(s) + '"></i>' + escapeHtml(s) + '</span>').join("");
+    const statusCounts = {}; members.forEach((t) => { const key = String(t.Status || "Unspecified"); statusCounts[key] = (statusCounts[key] || 0) + 1; });
+    const legend = usedStatuses.map((s) => '<span class="rm-leg"><i style="background:' + statusColor(s) + '"></i>' + escapeHtml(s) + (statusCounts[s] ? ' <b>' + statusCounts[s] + '</b>' : '') + '</span>').join("");
 
+    const focusSubtaskRows = (t) => {
+      const parent = rng(t), left = pctOf(parent.s);
+      return (State.subtasksByParent[t.TaskID] || []).slice().sort((a, z) => (Number(a.Order) || 0) - (Number(z.Order) || 0)).map((sub) => {
+        const done = String(sub.Done || "").toLowerCase() === "yes", due = isoDate(sub.DueDate) || parent.e;
+        const width = Math.max(1.5, pctOf(due) - left), overdue = !done && due < new Date().toISOString().slice(0, 10);
+        return '<div class="rm-focus-subrow"><div class="rm-row-track"><div class="rm-focus-subbar' + (done ? ' done' : '') + (overdue ? ' overdue' : '') + '" style="left:' + left + '%;width:' + width + '%"><span class="rm-focus-subcheck">' + (done ? '✓' : '○') + '</span><span>' + escapeHtml(sub.Text || "Subtask") + '</span><small>' + escapeHtml(sub.Owner || (sub.DueDate ? formatDateShort(sub.DueDate) : "")) + '</small></div></div></div>';
+      }).join("");
+    };
     const rowsHtml = members.slice().sort((a, b) => { const ra = rng(a).s, rb = rng(b).s; return ra < rb ? -1 : ra > rb ? 1 : 0; }).map((t) => {
       const r = rng(t), left = pctOf(r.s), width = Math.max(1.5, pctOf(r.e) - left);
       const pct = Math.max(0, Math.min(100, Number(t.PercentComplete) || 0));
       const hl = t.Health ? " rm-h-" + statusSlug(t.Health) : "";
       const blocked = isBlockedStatus(t.Status) ? " rm-blocked" : "";
-      const bar = '<div class="rm-bar' + hl + blocked + '" style="left:' + left + '%;width:' + width + '%;background:' + statusColor(t.Status) + '" data-task-id="' + t.TaskID + '" title="' + escapeAttr(t.Title + " · " + (t.Status || "")) + '">' +
+      const subs = State.subtasksByParent[t.TaskID] || [], expanded = State.roadmap.focusExpanded.has(Number(t.TaskID));
+      const caret = subs.length ? '<button class="rm-focus-caret" data-rf-exp="' + t.TaskID + '" type="button" title="' + (expanded ? 'Hide subtasks' : 'Show subtasks') + '">' + (expanded ? '−' : '+') + '</button>' : '';
+      const bar = '<div class="rm-bar rm-focus-taskbar' + hl + blocked + '" style="left:' + left + '%;width:' + width + '%;--task-status:' + escapeAttr(statusColor(t.Status)) + '" data-task-id="' + t.TaskID + '" title="' + escapeAttr(t.Title + " · " + (t.Status || "")) + '">' +
         '<span class="rm-handle rm-handle-l" data-grip="l"></span>' +
-        '<span class="rm-bar-fill" style="width:' + pct + '%"></span>' + scheduleChip(t) +
+        '<span class="rm-bar-fill" style="width:' + pct + '%"></span>' + caret + scheduleChip(t) +
         '<span class="rm-bar-label">' + escapeHtml(t.Title || "") + '</span>' +
+        '<span class="rm-task-status-dot" title="' + escapeAttr(t.Status || "") + '"></span>' +
         '<span class="rm-handle rm-handle-r" data-grip="r"></span></div>';
-      return '<div class="rm-row rm-focus-timeline-row" data-task-id="' + t.TaskID + '"><div class="rm-row-track">' + bar + '<div class="rm-today" style="left:' + todayPct + '%"></div></div></div>';
+      return '<div class="rm-focus-taskwrap"><div class="rm-row rm-focus-timeline-row" data-task-id="' + t.TaskID + '"><div class="rm-row-track">' + bar + '<div class="rm-today" style="left:' + todayPct + '%"></div></div></div>' + (expanded ? '<div class="rm-focus-subtasks">' + focusSubtaskRows(t) + '</div>' : '') + '</div>';
     }).join("");
 
     host.innerHTML =
       '<div class="rm-focus">' +
         '<header class="rm-focus-head">' +
-          '<input id="rf-title" class="rm-focus-title" value="' + escapeAttr(f.name) + '" title="Rename group" />' +
-          '<span class="rm-focus-meta">' + escapeHtml(workstreamName(f.wid)) + ' · ' + members.length + ' item' + (members.length === 1 ? "" : "s") + '</span>' +
-          '<span style="flex:1"></span>' +
-          '<button class="btn btn-secondary btn-sm" id="rf-add">+ Add task</button>' +
-          '<div class="rf-ai-wrap"><button class="btn btn-secondary btn-sm" id="rf-ai">✨ AI</button>' +
-            '<div class="rf-ai-menu" id="rf-ai-menu" hidden><div class="rf-ai-head">AI prompts</div>' +
-              '<button class="rf-ai-item" data-ai="name">Help Name Group Based On Tasks</button></div></div>' +
-          '<button class="btn btn-secondary btn-sm" id="rf-fields-toggle">Details ▾</button>' +
-          '<button class="btn btn-secondary btn-sm" id="rf-export">Export</button>' +
-          '<button class="btn btn-archive btn-sm" id="rf-ungroup">Ungroup</button>' +
-          '<button class="close-btn" id="rf-close" type="button">×</button>' +
+          '<div class="rf-heading"><input id="rf-title" class="rm-focus-title" value="' + escapeAttr(f.name) + '" title="Rename group" /><span class="rm-focus-meta">' + escapeHtml(workstreamName(f.wid)) + ' · ' + members.length + ' item' + (members.length === 1 ? "" : "s") + '</span></div>' +
+          '<div class="rf-primary-actions"><button class="btn btn-primary btn-sm" id="rf-add">+ Add task</button><button class="btn btn-secondary btn-sm" id="rf-fields-toggle">Details</button>' +
+            '<div class="rf-ai-wrap"><button class="btn btn-secondary btn-sm" id="rf-ai" title="Create a context-rich prompt from the group tasks">✨ AI</button><div class="rf-ai-menu" id="rf-ai-menu" hidden><div class="rf-ai-head">Group assistance</div><button class="rf-ai-item" data-ai="name">Suggest a concise group name</button></div></div>' +
+            '<div class="rf-more-wrap"><button class="btn btn-secondary btn-sm" id="rf-more" type="button">More ▾</button><div class="rf-more-menu" id="rf-more-menu" hidden><button id="rf-export" type="button">Export this group</button><button id="rf-fit" type="button">Fit dates to tasks</button><button id="rf-ungroup" class="danger" type="button">Ungroup tasks</button></div></div>' +
+            '<button class="close-btn" id="rf-close" type="button" aria-label="Close">×</button></div>' +
         '</header>' +
         '<section class="rf-fields" id="rf-fields" hidden>' +
-          '<label>Description<textarea id="rf-description" rows="2">' + escapeHtml(groupMeta.Description || "") + '</textarea></label>' +
-          '<label>Start date<input id="rf-start" type="date" value="' + escapeAttr(isoDate(groupMeta.StartDate) || "") + '"></label>' +
-          '<label>End date<input id="rf-end" type="date" value="' + escapeAttr(isoDate(groupMeta.EndDate) || "") + '"></label>' +
-          '<label>Progress<input id="rf-progress" value="' + escapeAttr(groupMeta.Progress || "") + '"></label>' +
-          '<label>Business value<input id="rf-business-value" value="' + escapeAttr(groupMeta.BusinessValue || "") + '"></label>' +
-          '<label>Function<input id="rf-function" value="' + escapeAttr(groupMeta.Function || "") + '"></label>' +
-          '<label>Business unit<input id="rf-business-unit" value="' + escapeAttr(groupMeta.BusinessUnit || "") + '"></label>' +
-          '<label>Category<input id="rf-category" value="' + escapeAttr(groupMeta.Category || "") + '"></label>' +
-          '<label>XR<input id="rf-xr" value="' + escapeAttr(groupMeta.XR || "") + '"></label>' +
-          '<label>Bucket<input id="rf-bucket" value="' + escapeAttr(groupMeta.Bucket || "") + '"></label>' +
-          '<label>Source<input id="rf-source" value="' + escapeAttr(groupMeta.Source || "") + '"></label>' +
-          '<label>Roadmunk ID<input id="rf-roadmunk-id" value="' + escapeAttr(groupMeta.RoadmunkID || "") + '"></label>' +
-          '<label>External ID<input id="rf-external-id" value="' + escapeAttr(groupMeta.ExternalID || "") + '"></label>' +
-          '<button class="btn btn-primary" id="rf-save-fields">Save group details</button>' +
+          '<div class="rf-section rf-overview"><h3>Overview</h3><label>Description<textarea id="rf-description" rows="3">' + escapeHtml(groupMeta.Description || "") + '</textarea></label><label>Progress<input id="rf-progress" value="' + escapeAttr(groupMeta.Progress || "") + '"></label><label>Business value<input id="rf-business-value" value="' + escapeAttr(groupMeta.BusinessValue || "") + '"></label></div>' +
+          '<div class="rf-section"><h3>Schedule</h3><label>Start date<input id="rf-start" type="date" value="' + escapeAttr(isoDate(groupMeta.StartDate) || "") + '"></label><label>End date<input id="rf-end" type="date" value="' + escapeAttr(isoDate(groupMeta.EndDate) || "") + '"></label><p class="rf-help">The group may extend beyond its tasks, but cannot exclude a task date.</p></div>' +
+          '<div class="rf-section"><h3>Classification</h3><label>Function<input id="rf-function" value="' + escapeAttr(groupMeta.Function || "") + '"></label><label>Business unit<input id="rf-business-unit" value="' + escapeAttr(groupMeta.BusinessUnit || "") + '"></label><label>Category<input id="rf-category" value="' + escapeAttr(groupMeta.Category || "") + '"></label><label>XR<input id="rf-xr" value="' + escapeAttr(groupMeta.XR || "") + '"></label><label>Bucket<input id="rf-bucket" value="' + escapeAttr(groupMeta.Bucket || "") + '"></label></div>' +
+          '<div class="rf-section"><h3>Roadmunk mapping</h3><label>Source<input id="rf-source" value="' + escapeAttr(groupMeta.Source || "") + '"></label><label>Roadmunk ID<input id="rf-roadmunk-id" value="' + escapeAttr(groupMeta.RoadmunkID || "") + '"></label><label>External ID<input id="rf-external-id" value="' + escapeAttr(groupMeta.ExternalID || "") + '"></label></div>' +
+          '<footer class="rf-fields-footer"><span id="rf-fields-state">Changes are saved when you choose Save.</span><button class="btn btn-secondary btn-sm" id="rf-fit-fields" type="button">Fit to tasks</button><button class="btn btn-primary" id="rf-save-fields">Save details</button></footer>' +
         '</section>' +
         '<div class="rm-legend">' + legend + '<span class="rm-leg-hint">Drag bars to change dates · drag edges to resize · click a bar to open</span></div>' +
         '<div class="rm-scroll"><div class="rm">' +
@@ -3219,7 +3314,17 @@
     host.tabIndex = -1; host.focus({ preventScroll: true });
     const fields = host.querySelector("#rf-fields");
     host.querySelector("#rf-fields-toggle").addEventListener("click", () => { fields.hidden = !fields.hidden; });
-    host.querySelector("#rf-export").addEventListener("click", () => exportRoadmapGroups([groupMeta], "roadmap-group.csv"));
+    const moreBtn = host.querySelector("#rf-more"), moreMenu = host.querySelector("#rf-more-menu");
+    moreBtn.addEventListener("click", (e) => { e.stopPropagation(); moreMenu.hidden = !moreMenu.hidden; });
+    const fitToTasks = () => {
+      const ranges = members.map(rng); if (!ranges.length) return;
+      host.querySelector("#rf-start").value = ranges.map((x) => x.s).sort()[0];
+      host.querySelector("#rf-end").value = ranges.map((x) => x.e).sort().slice(-1)[0];
+      fields.hidden = false; host.querySelector("#rf-fields-state").textContent = "Dates fitted to the earliest and latest task. Save to apply.";
+    };
+    host.querySelector("#rf-fit").addEventListener("click", () => { moreMenu.hidden = true; fitToTasks(); });
+    host.querySelector("#rf-fit-fields").addEventListener("click", fitToTasks);
+    host.querySelector("#rf-export").addEventListener("click", () => { moreMenu.hidden = true; exportRoadmapGroups([groupMeta], "roadmap-group.csv"); });
     host.querySelector("#rf-save-fields").addEventListener("click", async () => {
       const btn = host.querySelector("#rf-save-fields"); btn.disabled = true; btn.textContent = "Saving…";
       try {
@@ -3236,6 +3341,11 @@
     document.addEventListener("mousedown", function closer(e) { if (aiMenu && !aiMenu.parentElement.contains(e.target)) { aiMenu.hidden = true; } });
     host.querySelector('.rf-ai-item[data-ai="name"]').addEventListener("click", () => { aiMenu.hidden = true; copyGroupAiPrompt(); });
 
+    Array.from(host.querySelectorAll(".rm-focus-caret[data-rf-exp]")).forEach((btn) => btn.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation(); const id = Number(btn.dataset.rfExp);
+      State.roadmap.focusExpanded.has(id) ? State.roadmap.focusExpanded.delete(id) : State.roadmap.focusExpanded.add(id);
+      renderGroupFocus();
+    }));
     Array.from(host.querySelectorAll(".rm-bar[data-task-id]")).forEach((bar) => {
       const task = State.tasks.find((x) => Number(x.TaskID) === Number(bar.dataset.taskId));
       if (task) wireRoadmapDrag(bar, task, { pctOf: pctOf, isoFromPct: isoFromPct });
@@ -3318,6 +3428,17 @@
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(ok, () => fallbackCopy(text, ok));
     else fallbackCopy(text, ok);
   }
+  function buildTaskAiPrompt(kind) {
+    const t=currentEditingTask||{}, subs=currentSubtasks||[], updates=(State.allUpdates||[]).filter((u)=>String(u.ParentTaskID)===String(t.TaskID)).slice(-8);
+    const context = ['Title: '+(t.Title||document.getElementById("m-title").value||""),'Description: '+(document.getElementById("m-description").value||""),'Status: '+(document.getElementById("m-status").value||""),'Workstream: '+workstreamName(document.getElementById("m-workstream").value),'Quarter: '+(document.getElementById("m-quarter").value||""),'Dates: '+(document.getElementById("m-start").value||"?")+' to '+(document.getElementById("m-due").value||"?"),'Subtasks: '+subs.map((s)=>s.Text+' ['+s.Done+']').join('; '),'Recent updates: '+updates.map((u)=>u.Text||u.UpdateText||"").filter(Boolean).join(' | ')].join('\n');
+    const asks={description:'Draft a concise, outcome-focused task description. Preserve facts and flag missing information.',subtasks:'Suggest a practical, ordered subtask checklist with clear completion outcomes.',risks:'Identify delivery risks, dependencies, assumptions, and useful mitigations.',wsjf:'Recommend WSJF input considerations. Explain value, time criticality, risk reduction, and job size without inventing facts.',update:'Draft a concise stakeholder update with delivered, next, risks, and decisions needed.'};
+    return (asks[kind]||asks.description)+'\n\n'+context;
+  }
+  function openTaskAiMenu() {
+    const choices=[['description','Draft description'],['subtasks','Suggest subtasks'],['risks','Identify risks'],['wsjf','Review WSJF inputs'],['update','Draft stakeholder update']];
+    let host=document.getElementById("task-ai-panel"); if(host)host.remove(); host=document.createElement("div");host.id="task-ai-panel";host.className="task-ai-panel";host.innerHTML='<header><strong>Copilot assistance</strong><button type="button">×</button></header><p>Copies task context and an instruction to the clipboard. Review Copilot output before applying it.</p>'+choices.map((x)=>'<button type="button" data-task-ai="'+x[0]+'"><b>'+x[1]+'</b><small>'+({description:'Improve clarity and expected outcome',subtasks:'Break work into executable steps',risks:'Review dependencies and mitigations',wsjf:'Support a more informed priority discussion',update:'Create a structured progress summary'}[x[0]])+'</small></button>').join('');document.body.appendChild(host);host.querySelector('header button').onclick=()=>host.remove();host.querySelectorAll('[data-task-ai]').forEach((btn)=>btn.onclick=()=>{const text=buildTaskAiPrompt(btn.dataset.taskAi);const ok=()=>{toast('Copilot prompt copied. Review the output before updating the task.','info');host.remove();};navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(text).then(ok,()=>fallbackCopy(text,ok)):fallbackCopy(text,ok);});
+  }
+
   function fallbackCopy(text, cb) {
     try {
       const ta = document.createElement("textarea");
@@ -3396,6 +3517,31 @@
     setTimeout(() => { const ti = box.querySelector("#ms-title"); if (ti) ti.focus(); }, 0);
   }
 
+  const DEFAULT_PERSON_ROLES = ["Product Owner","Product Manager","Technical Product Manager","Business Partner","Business Owner","Engineering","Architecture","ISRM","Privacy","Legal","Quality","Regulatory","Finance","Procurement","Operations","Support","Vendor","Advisor","Stakeholder","Other"];
+  const DEFAULT_PERSON_CATEGORIES = ["Technology","Business","ISRM","Privacy","Legal","Quality","Regulatory","Finance","Procurement","HR","Vendor","Other"];
+  function personByName(name) { return (State.people || []).find((p) => String(p.DisplayName || "").trim().toLowerCase() === String(name || "").trim().toLowerCase()) || null; }
+  function assignmentsForPerson(id) { return (State.personWorkstreams || []).filter((x) => String(x.PersonID) === String(id)); }
+  function personPriority(person, wid) {
+    const active = String(person.Status || "Active").toLowerCase() !== "no longer with team";
+    const inWs = assignmentsForPerson(person.PersonID).some((x) => String(x.WorkstreamID) === String(wid || ""));
+    const main = String(person.TeamType || "").toLowerCase() === "main team";
+    return (active ? 0 : 100) + (inWs ? 0 : main ? 10 : 20);
+  }
+  function orderedPeople(wid) { return (State.people || []).slice().sort((a,z) => personPriority(a,wid)-personPriority(z,wid) || String(a.Category||"").localeCompare(String(z.Category||"")) || String(a.DisplayName||"").localeCompare(String(z.DisplayName||""))); }
+  function peopleOptionsHtml(selected, wid, allowEmpty) {
+    const chosen = String(selected || ""), grouped = new Map();
+    orderedPeople(wid).forEach((p) => { const key = personPriority(p,wid) < 10 ? "Workstream team" : String(p.TeamType || p.Category || "Other"); if (!grouped.has(key)) grouped.set(key, []); grouped.get(key).push(p); });
+    let html = allowEmpty ? '<option value=""></option>' : '';
+    grouped.forEach((rows,label) => { html += '<optgroup label="' + escapeAttr(label) + '">' + rows.map((p) => '<option value="' + escapeAttr(p.DisplayName) + '" ' + (chosen===String(p.DisplayName)?'selected':'') + '>' + escapeHtml(p.DisplayName) + (p.Role?' · '+escapeHtml(p.Role):'') + '</option>').join('') + '</optgroup>'; });
+    if (!State.people.length) html += (State.config.Owners || []).map((n) => '<option value="' + escapeAttr(n) + '" ' + (chosen===String(n)?'selected':'') + '>' + escapeHtml(n) + '</option>').join('');
+    return html;
+  }
+  function personCardText(name) {
+    const p = personByName(name); if (!p) return name;
+    const roles = assignmentsForPerson(p.PersonID).map((x) => (workstreamName(x.WorkstreamID) || x.WorkstreamID) + (x.Role ? ' · ' + x.Role : '')).join('; ');
+    return [p.DisplayName,p.Title,p.Email,p.TeamType,p.Category,p.Function,roles].filter(Boolean).join(' · ');
+  }
+
   // ───── Config screen ─────
   function renderConfig() {
     const root = document.getElementById("configview");
@@ -3411,6 +3557,8 @@
 
     root.appendChild(configSectionZoom());
     root.appendChild(configSectionRoadmunk());
+    root.appendChild(configSectionPeople());
+    root.appendChild(configSectionWorkstreamResources());
     root.appendChild(configSectionStatuses());
 
     root.appendChild(configSectionIdName({
@@ -3492,6 +3640,40 @@
       saveRoadmunkMap(next); toast("Roadmunk field mapping saved.", "info");
     });
     return sec;
+  }
+
+  const DEFAULT_WS_LINK_TYPES = ["Asset Management","Nexus","CMDB","Roadmunk","SharePoint","Teams","Confluence","Architecture","Security","Privacy","Business","Other"];
+  function linksForWorkstream(wid) { return State.workstreamLinks.filter((x) => String(x.WorkstreamID) === String(wid)); }
+  function documentsForWorkstream(wid) { return State.workstreamDocuments.filter((x) => String(x.WorkstreamID) === String(wid)); }
+  function resourceIcon(type) { const t=String(type||"").toLowerCase(); return t.includes("roadmunk")?"↗":t.includes("cmdb")?"▣":t.includes("nexus")?"◆":t.includes("sharepoint")?"▦":t.includes("teams")?"◉":"🔗"; }
+  function configSectionWorkstreamResources() {
+    const sec=document.createElement("section"); sec.className="config-section ws-resource-config";
+    sec.innerHTML='<div class="config-section-head"><div><h3>Workstream links and documents</h3><p class="muted">Add operational systems, Roadmunk, reference documents, and other resources to a workstream.</p></div><button class="btn btn-primary btn-sm" data-add-resource>+ Add resource</button></div><div class="ws-resource-admin"></div>';
+    const list=sec.querySelector('.ws-resource-admin');
+    const draw=()=>{ const rows=State.workstreams.map((w)=>{const links=linksForWorkstream(w.WorkstreamID),docs=documentsForWorkstream(w.WorkstreamID);return '<details class="ws-resource-group"><summary><strong>'+escapeHtml(w.Name||w.WorkstreamID)+'</strong><span>'+links.length+' links · '+docs.length+' documents</span></summary><div class="ws-resource-list">'+links.map((x)=>'<div data-resource-kind="link" data-resource-id="'+escapeAttr(x.WorkstreamLinkID)+'"><span>'+resourceIcon(x.LinkType)+'</span><b>'+escapeHtml(x.Label||x.LinkType)+'</b><small>'+escapeHtml(x.LinkType||'')+'</small><button data-edit-resource>Edit</button></div>').join('')+docs.map((x)=>'<div data-resource-kind="document" data-resource-id="'+escapeAttr(x.WorkstreamDocumentID)+'"><span>📄</span><b>'+escapeHtml(x.Label||x.DocumentType)+'</b><small>'+escapeHtml(x.DocumentType||'')+'</small><button data-edit-resource>Edit</button></div>').join('')+'</div></details>';}).join('');list.innerHTML=rows||'<div class="config-empty">Add a workstream first.</div>';};
+    const edit=(kind,item)=>{const isDoc=kind==='document',x=item||{},o=document.createElement('div');o.className='confirm-overlay ws-resource-overlay';o.innerHTML='<div class="ws-resource-editor"><header><h3>'+(item?'Edit':'Add')+' workstream '+(isDoc?'document':'link')+'</h3><button data-close>×</button></header><div><label>Workstream<select data-r="WorkstreamID">'+optionMarkup(State.workstreams.map((w)=>w.WorkstreamID),x.WorkstreamID||'')+'</select></label><label>Label<input data-r="Label" value="'+escapeAttr(x.Label||'')+'"></label><label>URL<input data-r="Url" type="url" value="'+escapeAttr(x.Url||'')+'"></label><label>Type<select data-r="Type">'+optionMarkup(DEFAULT_WS_LINK_TYPES,isDoc?(x.DocumentType||'SharePoint'):(x.LinkType||'Other'))+'</select></label><label class="wide">Description<textarea data-r="Description">'+escapeHtml(x.Description||'')+'</textarea></label>'+(isDoc?'<label class="wide">Tags<input data-r="Tags" value="'+escapeAttr(x.Tags||'')+'"></label>':'<label>Order<input data-r="Order" type="number" value="'+escapeAttr(x.Order||'')+'"></label>')+'</div><footer>'+(item?'<button class="btn btn-archive" data-delete>Delete</button>':'<span></span>')+'<button class="btn btn-secondary" data-close>Cancel</button><button class="btn btn-primary" data-save>Save</button></footer></div>';document.body.appendChild(o);o.querySelectorAll('[data-close]').forEach((e)=>e.onclick=()=>o.remove());o.querySelector('[data-save]').onclick=async()=>{const v={};o.querySelectorAll('[data-r]').forEach((e)=>v[e.dataset.r]=e.value);if(!v.WorkstreamID||!v.Label||!v.Url)return toast('Workstream, label, and URL are required.','warn');if(isDoc){v.WorkstreamDocumentID=x.WorkstreamDocumentID||'';v.DocumentType=v.Type;delete v.Type;await window.WsjfData.upsertWorkstreamDocument(v);}else{v.WorkstreamLinkID=x.WorkstreamLinkID||'';v.LinkType=v.Type;delete v.Type;await window.WsjfData.upsertWorkstreamLink(v);}await loadConfigAndDimensions();o.remove();renderConfig();};if(item)o.querySelector('[data-delete]').onclick=async()=>{if(isDoc)await window.WsjfData.deleteWorkstreamDocument(x.WorkstreamDocumentID);else await window.WsjfData.deleteWorkstreamLink(x.WorkstreamLinkID);await loadConfigAndDimensions();o.remove();renderConfig();};};
+    sec.querySelector('[data-add-resource]').onclick=async()=>{const choice=await uiChoose('Add resource',[{value:'link',label:'Link or system'},{value:'document',label:'Document'}]);if(choice)edit(choice,null);};list.onclick=(e)=>{const btn=e.target.closest('[data-edit-resource]');if(!btn)return;const row=btn.closest('[data-resource-kind]'),kind=row.dataset.resourceKind,id=row.dataset.resourceId,item=kind==='link'?State.workstreamLinks.find((x)=>String(x.WorkstreamLinkID)===id):State.workstreamDocuments.find((x)=>String(x.WorkstreamDocumentID)===id);edit(kind,item);};draw();return sec;
+  }
+
+  function configSectionPeople() {
+    const sec = document.createElement("section"); sec.className = "config-section people-config";
+    sec.innerHTML = '<div class="config-section-head"><div><h3>People and workstream roles</h3><p class="muted">Manage the main team, extended partners, contact information, status, and workstream-specific roles.</p></div><button class="btn btn-primary btn-sm" id="pc-add-person">+ Add person</button></div><div class="people-admin-list"></div>';
+    const list = sec.querySelector(".people-admin-list");
+    const renderRows = () => { list.innerHTML = (State.people || []).map((p) => {
+      const assignments = assignmentsForPerson(p.PersonID);
+      return '<article class="people-admin-card" data-person-id="' + escapeAttr(p.PersonID) + '"><div class="people-admin-avatar" style="background:' + colorHash(p.DisplayName) + '">' + initialsFromName(p.DisplayName) + '</div><div class="people-admin-main"><strong>' + escapeHtml(p.DisplayName) + '</strong><span>' + escapeHtml([p.Title,p.Email].filter(Boolean).join(' · ')) + '</span><small>' + escapeHtml([p.TeamType,p.Category,p.Function,p.Status].filter(Boolean).join(' · ')) + '</small><div class="people-role-chips">' + assignments.map((a) => '<span>' + escapeHtml(workstreamName(a.WorkstreamID) || a.WorkstreamID) + ' · ' + escapeHtml(a.Role || 'Member') + '</span>').join('') + '</div></div><button class="btn btn-secondary btn-sm" data-edit-person>Edit</button></article>';
+    }).join('') || '<div class="config-empty">PeopleTable is empty. Add the first person after creating the required workbook tables.</div>'; };
+    const openEditor = (person) => {
+      const p = person || {}, overlay = document.createElement('div'); overlay.className = 'confirm-overlay people-editor-overlay';
+      overlay.innerHTML = '<div class="people-editor"><header><h3>' + (person?'Edit person':'Add person') + '</h3><button data-close>×</button></header><div class="people-editor-grid"><label>Name<input data-p="DisplayName" value="' + escapeAttr(p.DisplayName||'') + '"></label><label>Email<input data-p="Email" type="email" value="' + escapeAttr(p.Email||'') + '"></label><label>Title<input data-p="Title" value="' + escapeAttr(p.Title||'') + '"></label><label>Company<input data-p="Company" value="' + escapeAttr(p.Company||'') + '"></label><label>Team type<select data-p="TeamType">' + optionMarkup(['Main Team','Extended Team','External Partner'],p.TeamType||'Extended Team') + '</select></label><label>Category<select data-p="Category">' + optionMarkup(DEFAULT_PERSON_CATEGORIES,p.Category||'Technology') + '</select></label><label>Function<input data-p="Function" value="' + escapeAttr(p.Function||'') + '"></label><label>Status<select data-p="Status">' + optionMarkup(['Active','Inactive','No Longer With Team'],p.Status||'Active') + '</select></label><label class="wide">Notes<textarea data-p="Notes">' + escapeHtml(p.Notes||'') + '</textarea></label><div class="wide people-assignments"><h4>Workstream roles</h4><div data-assignment-list></div><button class="btn-link" data-add-assignment>+ Add workstream role</button></div></div><footer><button class="btn btn-secondary" data-close>Cancel</button><button class="btn btn-primary" data-save>Save person</button></footer></div>';
+      document.body.appendChild(overlay); const al=overlay.querySelector('[data-assignment-list]');
+      const assignmentRows=(assignmentsForPerson(p.PersonID)||[]).map((a)=>Object.assign({},a));
+      const renderAssignments=()=>{ al.innerHTML=assignmentRows.map((a,i)=>'<div class="people-assignment-row"><select data-aw="' + i + '">' + optionMarkup(State.workstreams.map((w)=>w.WorkstreamID),a.WorkstreamID) + '</select><select data-ar="' + i + '">' + optionMarkup(DEFAULT_PERSON_ROLES,a.Role||'Stakeholder') + '</select><button data-remove-assignment="' + i + '">×</button></div>').join(''); al.querySelectorAll('[data-remove-assignment]').forEach((x)=>x.addEventListener('click',()=>{assignmentRows.splice(Number(x.dataset.removeAssignment),1);renderAssignments();})); };
+      renderAssignments(); overlay.querySelector('[data-add-assignment]').addEventListener('click',()=>{assignmentRows.push({WorkstreamID:State.workstreams[0]&&State.workstreams[0].WorkstreamID||'',Role:'Stakeholder'});renderAssignments();});
+      overlay.querySelectorAll('[data-close]').forEach((x)=>x.addEventListener('click',()=>overlay.remove()));
+      overlay.querySelector('[data-save]').addEventListener('click',async()=>{ const obj={PersonID:p.PersonID||''}; overlay.querySelectorAll('[data-p]').forEach((x)=>obj[x.dataset.p]=x.value); if(!obj.DisplayName.trim())return toast('Name is required.','warn'); const id=await window.WsjfData.upsertPerson(obj); const existing=assignmentsForPerson(id); for(const a of existing) await window.WsjfData.deletePersonWorkstream(a.PersonWorkstreamID); assignmentRows.forEach((a,i)=>{ const ws=overlay.querySelector('[data-aw="'+i+'"]'), role=overlay.querySelector('[data-ar="'+i+'"]'); if(ws&&ws.value) window.WsjfData.upsertPersonWorkstream({PersonID:id,WorkstreamID:ws.value,Role:role.value,IsPrimary:i===0?'Yes':'No'}); }); await loadConfigAndDimensions(); overlay.remove(); renderConfig(); });
+    };
+    sec.querySelector('#pc-add-person').addEventListener('click',()=>openEditor(null)); list.addEventListener('click',(e)=>{const btn=e.target.closest('[data-edit-person]');if(btn){const id=btn.closest('[data-person-id]').dataset.personId;openEditor(State.people.find((p)=>String(p.PersonID)===id));}}); renderRows(); return sec;
   }
 
   function configSectionZoom() {
@@ -4119,6 +4301,7 @@
     document.getElementById("m-close").addEventListener("click", closeModalAsk);
     document.getElementById("m-cancel").addEventListener("click", closeModalAsk);
     document.getElementById("m-save").addEventListener("click", saveModal);
+    document.getElementById("m-ai").addEventListener("click", openTaskAiMenu);
     document.getElementById("m-archive").addEventListener("click", archiveFromModal);
     document.getElementById("modal-overlay").addEventListener("click", (e) => {
       if (e.target.id === "modal-overlay") closeModalAsk();
@@ -4211,7 +4394,25 @@
     document.getElementById("m-description").addEventListener("input", markDirty);
   }
 
-  function markDirty() { modalDirty = true; }
+  let draftTimer = null;
+  function taskDraftKey() { return "pmTaskDraft:" + (currentEditingTask && currentEditingTask.TaskID ? currentEditingTask.TaskID : "new"); }
+  function captureTaskDraft() {
+    if (!State.modalOpen || !currentEditingTask) return;
+    const ids = ["m-title","m-description","m-owner","m-workstream","m-quarter","m-status","m-health","m-start","m-due","m-rgroup"];
+    const fields = {}; ids.forEach((id) => { const el=document.getElementById(id); if(el) fields[id]=el.value; });
+    lsSet(taskDraftKey(), JSON.stringify({ savedAt: Date.now(), fields: fields, contributors: currentContributors(), tags: currentTags() }));
+    const note=document.getElementById("m-draft-state"); if(note) note.textContent="Draft protected locally";
+  }
+  function restoreTaskDraft() {
+    let draft=null; try { draft=JSON.parse(lsGet(taskDraftKey(),"null")); } catch (_) {}
+    if (!draft || !draft.fields) return;
+    Object.keys(draft.fields).forEach((id)=>{const el=document.getElementById(id);if(el)el.value=draft.fields[id];});
+    if (Array.isArray(draft.contributors)) renderContributors(draft.contributors);
+    if (Array.isArray(draft.tags)) { State.selectedTags=new Set(draft.tags); renderTagPills(); }
+    modalDirty=true; const note=document.getElementById("m-draft-state"); if(note) note.textContent="Recovered unsaved local draft";
+  }
+  function clearTaskDraft() { try { localStorage.removeItem(taskDraftKey()); } catch (_) {} }
+  function markDirty() { modalDirty = true; clearTimeout(draftTimer); draftTimer=setTimeout(captureTaskDraft,900); const note=document.getElementById("m-draft-state"); if(note) note.textContent="Unsaved changes"; }
 
   // Right-rail feed toggle (Updates / Activity).
   function switchRailTab(rail) {
@@ -4271,6 +4472,7 @@
       currentAttachments = atts.slice();
       currentTagList = collectAllTags();
       modalDirty = false;
+      setTimeout(restoreTaskDraft, 0);
       populateModal();
       renderSubtasks();
       renderAttachments();
@@ -4585,7 +4787,7 @@
     const due = isoDate(s.DueDate);
     const overdue = !checked && due && due < new Date().toISOString().slice(0, 10);
     const dueHtml = due ? '<span class="st-due-chip' + (overdue ? " overdue" : "") + '">📅 ' + escapeHtml(formatDateShort(due)) + '</span>' : "";
-    const ownHtml = s.Owner ? '<span class="st-avatar" style="background:' + colorHash(s.Owner) + '" title="' + escapeAttr(s.Owner) + '">' + initialsFromName(s.Owner) + '</span>' : "";
+    const ownHtml = s.Owner ? '<span class="st-avatar" style="background:' + colorHash(s.Owner) + '" title="' + escapeAttr(personCardText(s.Owner)) + '">' + initialsFromName(s.Owner) + '</span>' : "";
     li.innerHTML =
       '<span class="drag" title="Drag to reorder">⋮⋮</span>' +
       '<input type="checkbox"' + (checked ? " checked" : "") + ' title="Mark done" />' +
@@ -4870,7 +5072,7 @@
     wrap.innerHTML = "";
     currentContribList.forEach((p) => {
       const chip = document.createElement("span");
-      chip.className = "person-chip";
+      chip.className = "person-chip"; chip.title = personCardText(p);
       chip.innerHTML = '<span class="pc-avatar" style="background:' + colorHash(p) + '">' + initialsFromName(p) + '</span>' +
         escapeHtml(p) + ' <span class="pc-x" title="Remove">×</span>';
       chip.querySelector(".pc-x").addEventListener("click", () => {
@@ -4886,7 +5088,7 @@
     addBtn.type = "button"; addBtn.className = "pc-add"; addBtn.textContent = "＋";
     const menu = document.createElement("div");
     menu.className = "pc-menu"; menu.hidden = true;
-    const avail = (State.config.Owners || []).filter((o) => o && o !== owner && currentContribList.indexOf(o) < 0);
+    const avail = (State.people.length ? orderedPeople(document.getElementById("m-workstream").value).map((p) => p.DisplayName) : (State.config.Owners || [])).filter((o) => o && o !== owner && currentContribList.indexOf(o) < 0);
     if (!avail.length) menu.innerHTML = '<div class="pc-menu-empty">No more people</div>';
     avail.forEach((o) => {
       const item = document.createElement("div");
@@ -5195,11 +5397,13 @@
         // sync with the server-side cascade rather than re-opening them).
         const taskDone = isCompleteStatus(t.Status);
         await window.WsjfData.saveSubtasksBatch(t.TaskID, currentSubtasks, taskDone);
+        await window.WsjfData.setTaskRoadmapGroup([t.TaskID], t.RoadmapGroup || "");
         toast("Saved.", "info");
       } else {
         // Create path
         const newId = await window.WsjfData.createTask(t);
         t.TaskID = newId;
+        await window.WsjfData.setTaskRoadmapGroup([newId], t.RoadmapGroup || "");
         // Flush any in-memory subtasks/attachments collected before the task existed
         const createdDone = isCompleteStatus(t.Status);
         for (const s of currentSubtasks) {
@@ -5222,6 +5426,7 @@
 
       await window.WsjfData.syncTaskKeyResultLinks("Task", t.TaskID, currentTaskKeyResults(), State.me.name, isCompleteStatus(t.Status));
       modalDirty = false;
+      clearTaskDraft();
       State.keyResultLinks = await window.WsjfData.readTaskKeyResultLinks();
       await reloadTasks();
       hideModal();
@@ -5433,7 +5638,7 @@
     let h = shown.map((p) => {
       const over = isOverAllocated(p.name, task.Quarter);
       return '<span class="avatar' + (p.owner ? " avatar-owner" : "") + (over ? " avatar-overalloc" : "") + '" style="background:' +
-        colorHash(p.name) + '" title="' + escapeAttr(p.name + (p.owner ? " · owner" : " · contributor") + (over ? " · ⚠ over-allocated in " + task.Quarter : "")) +
+        colorHash(p.name) + '" title="' + escapeAttr(personCardText(p.name) + (p.owner ? " · owner" : " · contributor") + (over ? " · ⚠ over-allocated in " + task.Quarter : "")) +
         '">' + initialsFromName(p.name) + '</span>';
     }).join("");
     if (extra > 0) {

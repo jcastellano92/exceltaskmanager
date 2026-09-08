@@ -24,6 +24,10 @@
   const KR_TABLE    = "KeyResultsTable";
   const KR_LINK_TABLE = "TaskKeyResultLinksTable";
   const RG_TABLE = "RoadmapGroupsTable";
+  const PEOPLE_TABLE = "PeopleTable";
+  const PERSON_WS_TABLE = "PersonWorkstreamsTable";
+  const WS_LINKS_TABLE = "WorkstreamLinksTable";
+  const WS_DOCS_TABLE = "WorkstreamDocumentsTable";
   const CFG_SHEET   = "Config";
 
   // Which statuses mean "complete"? Set by the UI from StatusesTable's Bucket
@@ -787,7 +791,7 @@
     if (!row && obj.RoadmunkID) row = rows.find((r) => String(r.RoadmunkID || "") === String(obj.RoadmunkID));
     if (!row && obj.ExternalID) row = rows.find((r) => String(r.ExternalID || "") === String(obj.ExternalID));
     if (!row) row = rows.find((r) => String(r.WorkstreamID || "") === String(obj.WorkstreamID || "") && String(r.Name || "").trim().toLowerCase() === String(obj.Name || "").trim().toLowerCase());
-    const fields = ["WorkstreamID","Name","Description","StartDate","EndDate","Progress","BusinessValue","Function","BusinessUnit","Category","XR","Bucket","Source","RoadmunkID","ExternalID","Archived"];
+    const fields = ["WorkstreamID","Name","Description","StartDate","EndDate","Progress","BusinessValue","Function","BusinessUnit","Category","XR","Bucket","Source","RoadmunkID","ExternalID","SortOrder","Archived"];
     const payload = { LastUpdated: ts, UpdatedBy: me.name };
     fields.forEach((h) => { if (Object.prototype.hasOwnProperty.call(obj, h)) payload[h] = obj[h]; });
     if (row) { await _updateRowMulti(RG_TABLE, row._rowIndex, payload); return String(row.GroupID); }
@@ -812,7 +816,7 @@
       const read = (row, name) => { const i = col(name); return i < 0 ? "" : row[i]; };
       let maxId = 0;
       rows.forEach((row) => { const m = String(read(row, "GroupID") || "").match(/^RG(\d+)$/i); if (m) maxId = Math.max(maxId, Number(m[1]) || 0); });
-      const fields = ["WorkstreamID","Name","Description","StartDate","EndDate","Progress","BusinessValue","Function","BusinessUnit","Category","XR","Bucket","Source","RoadmunkID","ExternalID","Archived"];
+      const fields = ["WorkstreamID","Name","Description","StartDate","EndDate","Progress","BusinessValue","Function","BusinessUnit","Category","XR","Bucket","Source","RoadmunkID","ExternalID","SortOrder","Archived"];
       const findIndex = (item) => {
         if (item.GroupID) { const i = rows.findIndex((r) => String(read(r,"GroupID")) === String(item.GroupID)); if (i >= 0) return i; }
         if (item.RoadmunkID) { const i = rows.findIndex((r) => String(read(r,"RoadmunkID")) === String(item.RoadmunkID)); if (i >= 0) return i; }
@@ -860,6 +864,74 @@
       await ctx.sync(); return rows.length;
     });
   }
+
+  // ----- People directory and workstream roles -----
+  async function readPeople() {
+    const rows = await _readTable(PEOPLE_TABLE);
+    return rows.filter((r) => String(r.PersonID || "").trim() && String(r.Archived || "").toLowerCase() !== "yes");
+  }
+  async function readPersonWorkstreams() {
+    const rows = await _readTable(PERSON_WS_TABLE);
+    return rows.filter((r) => String(r.PersonWorkstreamID || "").trim() && String(r.Archived || "").toLowerCase() !== "yes");
+  }
+  async function upsertPerson(obj) {
+    obj = Object.assign({}, obj || {});
+    const me = await getCurrentUser(), ts = _nowIso(), rows = await _readTable(PEOPLE_TABLE);
+    let row = obj.PersonID ? rows.find((r) => String(r.PersonID) === String(obj.PersonID)) : null;
+    if (!row && obj.Email) row = rows.find((r) => String(r.Email || "").trim().toLowerCase() === String(obj.Email).trim().toLowerCase());
+    if (!row && obj.DisplayName) row = rows.find((r) => String(r.DisplayName || "").trim().toLowerCase() === String(obj.DisplayName).trim().toLowerCase());
+    const fields = ["DisplayName","Email","TeamType","Function","Category","Status","Title","Company","Notes","Archived"];
+    const payload = { LastUpdated: ts, UpdatedBy: me.name };
+    fields.forEach((f) => { if (Object.prototype.hasOwnProperty.call(obj, f)) payload[f] = obj[f]; });
+    if (row) { await _updateRowMulti(PEOPLE_TABLE, row._rowIndex, payload); return String(row.PersonID); }
+    payload.PersonID = String(obj.PersonID || await _nextPrefixedId(PEOPLE_TABLE, "PersonID", "P", 3));
+    if (!String(payload.DisplayName || "").trim()) throw new Error("Display name is required.");
+    await _appendObjByHeaders(PEOPLE_TABLE, payload); return payload.PersonID;
+  }
+  async function upsertPersonWorkstream(obj) {
+    obj = Object.assign({}, obj || {});
+    const me = await getCurrentUser(), ts = _nowIso(), rows = await _readTable(PERSON_WS_TABLE);
+    let row = obj.PersonWorkstreamID ? rows.find((r) => String(r.PersonWorkstreamID) === String(obj.PersonWorkstreamID)) : null;
+    if (!row) row = rows.find((r) => String(r.PersonID) === String(obj.PersonID) && String(r.WorkstreamID) === String(obj.WorkstreamID) && String(r.Role || "") === String(obj.Role || ""));
+    const payload = { PersonID: obj.PersonID || "", WorkstreamID: obj.WorkstreamID || "", Role: obj.Role || "", IsPrimary: obj.IsPrimary || "No", Archived: obj.Archived || "No", LastUpdated: ts, UpdatedBy: me.name };
+    if (row) { await _updateRowMulti(PERSON_WS_TABLE, row._rowIndex, payload); return String(row.PersonWorkstreamID); }
+    payload.PersonWorkstreamID = String(obj.PersonWorkstreamID || await _nextPrefixedId(PERSON_WS_TABLE, "PersonWorkstreamID", "PW", 3));
+    await _appendObjByHeaders(PERSON_WS_TABLE, payload); return payload.PersonWorkstreamID;
+  }
+  async function deletePersonWorkstream(id) {
+    const idx = await _findRowIndexById(PERSON_WS_TABLE, "PersonWorkstreamID", id);
+    if (idx >= 0) await _deleteRow(PERSON_WS_TABLE, idx);
+  }
+
+  // ----- Workstream resources -----
+  async function readWorkstreamLinks() {
+    const rows = await _readTable(WS_LINKS_TABLE);
+    return rows.filter((r) => String(r.WorkstreamLinkID || "").trim() && String(r.Archived || "").toLowerCase() !== "yes");
+  }
+  async function readWorkstreamDocuments() {
+    const rows = await _readTable(WS_DOCS_TABLE);
+    return rows.filter((r) => String(r.WorkstreamDocumentID || "").trim() && String(r.Archived || "").toLowerCase() !== "yes");
+  }
+  async function upsertWorkstreamLink(obj) {
+    obj = Object.assign({}, obj || {});
+    const me = await getCurrentUser(), ts = _nowIso(), rows = await _readTable(WS_LINKS_TABLE);
+    const row = obj.WorkstreamLinkID ? rows.find((r) => String(r.WorkstreamLinkID) === String(obj.WorkstreamLinkID)) : null;
+    const payload = { WorkstreamID: obj.WorkstreamID || "", Label: obj.Label || "", Url: obj.Url || "", LinkType: obj.LinkType || "Other", Description: obj.Description || "", Order: obj.Order || "", Archived: obj.Archived || "No", LastUpdated: ts, UpdatedBy: me.name };
+    if (row) { await _updateRowMulti(WS_LINKS_TABLE, row._rowIndex, payload); return String(row.WorkstreamLinkID); }
+    payload.WorkstreamLinkID = String(await _nextPrefixedId(WS_LINKS_TABLE, "WorkstreamLinkID", "WL", 3));
+    await _appendObjByHeaders(WS_LINKS_TABLE, payload); return payload.WorkstreamLinkID;
+  }
+  async function deleteWorkstreamLink(id) { const idx = await _findRowIndexById(WS_LINKS_TABLE, "WorkstreamLinkID", id); if (idx >= 0) await _deleteRow(WS_LINKS_TABLE, idx); }
+  async function upsertWorkstreamDocument(obj) {
+    obj = Object.assign({}, obj || {});
+    const me = await getCurrentUser(), ts = _nowIso(), rows = await _readTable(WS_DOCS_TABLE);
+    const row = obj.WorkstreamDocumentID ? rows.find((r) => String(r.WorkstreamDocumentID) === String(obj.WorkstreamDocumentID)) : null;
+    const payload = { WorkstreamID: obj.WorkstreamID || "", Label: obj.Label || "", Url: obj.Url || "", DocumentType: obj.DocumentType || "Other", Description: obj.Description || "", Tags: obj.Tags || "", Archived: obj.Archived || "No", AddedBy: obj.AddedBy || me.name, AddedDate: obj.AddedDate || ts.slice(0,10), LastUpdated: ts, UpdatedBy: me.name };
+    if (row) { await _updateRowMulti(WS_DOCS_TABLE, row._rowIndex, payload); return String(row.WorkstreamDocumentID); }
+    payload.WorkstreamDocumentID = String(await _nextPrefixedId(WS_DOCS_TABLE, "WorkstreamDocumentID", "WD", 3));
+    await _appendObjByHeaders(WS_DOCS_TABLE, payload); return payload.WorkstreamDocumentID;
+  }
+  async function deleteWorkstreamDocument(id) { const idx = await _findRowIndexById(WS_DOCS_TABLE, "WorkstreamDocumentID", id); if (idx >= 0) await _deleteRow(WS_DOCS_TABLE, idx); }
 
   // ----- Workstreams / Goals (tasks link by ID; renaming Name auto-propagates) -----
   // These log meaningful create/update/delete activity (not trivial UI actions).
@@ -1030,6 +1102,8 @@
     countTasksByField, countTasksByWorkstream, countTasksByGoal,
     renameOwner, renameQuarter, renameStatus, setStatusColor, setStatusOrder, updateStatusRow, addTableColumns, setCompleteStatuses,
     createWorkstream, updateWorkstream, deleteWorkstream,
+    readPeople, readPersonWorkstreams, upsertPerson, upsertPersonWorkstream, deletePersonWorkstream,
+    readWorkstreamLinks, readWorkstreamDocuments, upsertWorkstreamLink, deleteWorkstreamLink, upsertWorkstreamDocument, deleteWorkstreamDocument,
     readRoadmapGroups, upsertRoadmapGroup, deleteRoadmapGroup, importRoadmapGroups, saveSubtasksBatch,
     createGoal, updateGoal, deleteGoal,
     createKeyResult, updateKeyResult, archiveKeyResult,
