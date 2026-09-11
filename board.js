@@ -1378,13 +1378,6 @@
     html += '</tbody></table>';
     root.innerHTML = html;
 
-    const importBtn = root.querySelector("#rm-import-groups"), importFile = root.querySelector("#rm-import-file");
-    if (importBtn && importFile) {
-      importBtn.addEventListener("click", () => importFile.click());
-      importFile.addEventListener("change", () => { importRoadmapGroupsFile(importFile.files[0]); importFile.value = ""; });
-    }
-    const exportBtn = root.querySelector("#rm-export-groups");
-    if (exportBtn) exportBtn.addEventListener("click", () => exportRoadmapGroups());
 
     Array.from(root.querySelectorAll(".sel-row")).forEach((cb) => {
       cb.addEventListener("click", (e) => e.stopPropagation());
@@ -2663,8 +2656,35 @@
     return Array.from(map.values());
   }
   function exportRoadmapGroups(records, fileName) {
-    const rows = [roadmapGroupCsvHeaders()].concat((records || allRoadmapGroupRecords()).map(groupCsvRow));
-    downloadText(fileName || "roadmap-groups.csv", rows.map((r) => r.map(csvCell).join(",")).join("\r\n"));
+    const source = records || allRoadmapGroupRecords();
+    const rows = [roadmapGroupCsvHeaders()].concat(source.map(groupCsvRow));
+    downloadText(fileName || "roadmap-groups.csv", rows.map((row) => row.map(csvCell).join(",")).join("\r\n"));
+    toast("Exported " + source.length + " roadmap group(s).", "info");
+  }
+  function roadmapGroupRecordsForScope(scope, selectedGroup) {
+    const all = allRoadmapGroupRecords();
+    if (!scope || scope === "all") return all;
+    return all.filter((g) => {
+      const w = State.workstreams.find((x) => String(x.WorkstreamID) === String(g.WorkstreamID));
+      const group = String((w && w.Group) || "Other");
+      return scope === "current" ? group === String(selectedGroup || "Other") : group.trim().toLowerCase() === String(scope).trim().toLowerCase();
+    });
+  }
+  function taskEffectiveRange(task) {
+    let s = isoDate(task && task.StartDate), e = isoDate(task && task.DueDate);
+    const q = State.quarterDates[task && task.Quarter];
+    if (!s) s = q ? isoDate(q.start) : e;
+    if (!e) e = q ? isoDate(q.end) : s;
+    if (s && e && e < s) e = s;
+    return { s: s || "", e: e || "" };
+  }
+  function taskFitsGroupEnvelope(task, wid, name, proposedStart, proposedEnd) {
+    if (!name) return { ok: true };
+    const meta = roadmapGroupRecord(wid, name);
+    const gs = meta && isoDate(meta.StartDate), ge = meta && isoDate(meta.EndDate);
+    if (!gs || !ge) return { ok: true };
+    const current = taskEffectiveRange(task), s = isoDate(proposedStart) || current.s, e = isoDate(proposedEnd) || current.e;
+    return s && e && (s < gs || e > ge) ? { ok: false, start: gs, end: ge } : { ok: true };
   }
   function importRoadmapGroupsFile(file) {
     if (!file) return;
@@ -2741,7 +2761,7 @@
       '<div class="rm-head-right">' +
         '<label class="rm-toggle"><input type="checkbox" id="rm-show-dates"' + (State.roadmap.showDates ? " checked" : "") + '> Date tooltip on drag</label>' +
         '<button class="btn btn-secondary btn-sm" id="rm-import-groups">Import groups</button>' +
-        '<button class="btn btn-secondary btn-sm" id="rm-export-groups">Export groups</button>' +
+        '<div class="rm-export-wrap"><select id="rm-export-scope" class="rm-export-scope"><option value="all">All groups</option><option value="current">Current tab</option><option value="Portfolio">Portfolio</option><option value="Operations">Operations</option></select><button class="btn btn-secondary btn-sm" id="rm-export-groups">Export CSV</button></div>' +
         '<input id="rm-import-file" type="file" accept=".csv,text/csv" hidden>' +
         (State.workstreamLinks.some((x) => String(x.LinkType).toLowerCase() === "roadmunk") ? '<div class="rm-roadmunk-links">' + State.workstreamLinks.filter((x) => String(x.LinkType).toLowerCase() === "roadmunk").slice(0,4).map((x) => '<a class="btn btn-secondary btn-sm" href="' + escapeAttr(x.Url) + '" target="_blank" rel="noopener">Roadmunk · ' + escapeHtml(workstreamName(x.WorkstreamID) || x.Label) + '</a>').join("") + '</div>' : '') +
         '<span class="mine-who">' + escapeHtml(yearStart.slice(0, 4)) + '</span>' +
@@ -2837,6 +2857,7 @@
       return '<div class="rm-bar rm-groupbar" style="left:' + left + '%;width:' + width + '%" data-rg-group="' + escapeAttr(g.name) + '" data-rg-wid="' + escapeAttr(g.wid) + '" data-rg-start="' + escapeAttr(g.s) + '" data-rg-end="' + escapeAttr(g.e) + '" data-rg-min="' + escapeAttr(g.contentS) + '" data-rg-max="' + escapeAttr(g.contentE) + '" title="' + escapeAttr("Group: " + g.name + " · " + g.tasks.length + " items · click to open") + '">' +
         '<span class="rm-group-handle rm-group-handle-l" data-rg-grip="l"></span>' +
         '<button class="rm-group-order" type="button" draggable="true" title="Drag to reorder within this workstream">⠿</button>' +
+        '<span class="rm-group-content-range" style="left:' + Math.max(0, ((pctOf(g.contentS) - left) / Math.max(width, .01)) * 100) + '%;width:' + Math.max(1, ((pctOf(g.contentE) - pctOf(g.contentS)) / Math.max(width, .01)) * 100) + '%" title="Task date span"></span>' +
         '<span class="rm-groupbar-icon">▦</span>' +
         '<span class="rm-bar-label">' + escapeHtml(g.name) + ' (' + g.tasks.length + ')</span>' +
         '<span class="rm-group-composition">' + composition + '</span>' +
@@ -2941,6 +2962,18 @@
       el.addEventListener("mouseleave", () => { const card = document.getElementById("rm-hovercard"); if (card) card.hidden = true; });
     });
 
+    const importBtn = root.querySelector("#rm-import-groups"), importFile = root.querySelector("#rm-import-file");
+    if (importBtn && importFile) {
+      importBtn.addEventListener("click", () => importFile.click());
+      importFile.addEventListener("change", () => { importRoadmapGroupsFile(importFile.files[0]); importFile.value = ""; });
+    }
+    const exportBtn = root.querySelector("#rm-export-groups"), exportScope = root.querySelector("#rm-export-scope");
+    if (exportBtn) exportBtn.addEventListener("click", () => {
+      const scope = exportScope ? exportScope.value : "all", records = roadmapGroupRecordsForScope(scope, sel);
+      const label = scope === "current" ? String(sel || "current") : scope;
+      exportRoadmapGroups(records, "roadmap-groups-" + label.toLowerCase().replace(/[^a-z0-9]+/g, "-") + ".csv");
+    });
+
     // Group tabs.
     Array.from(root.querySelectorAll(".rm-tab[data-rm-group]")).forEach((b) => {
       b.addEventListener("click", () => { State.roadmap.group = b.dataset.rmGroup; lsSet("rmGroup", b.dataset.rmGroup); renderRoadmap(); });
@@ -2992,8 +3025,8 @@
         const from = names.indexOf(draggedGroup.dataset.rgGroup), to = names.indexOf(gb.dataset.rgGroup);
         names.splice(to, 0, names.splice(from, 1)[0]);
         await Promise.all(names.map((name, index) => {
-          const meta = roadmapGroupRecord(gb.dataset.rgWid, name) || { WorkstreamID: gb.dataset.rgWid, Name: name };
-          return window.WsjfData.upsertRoadmapGroup(Object.assign({}, meta, { SortOrder: index + 1 }));
+          const meta = roadmapGroupRecord(gb.dataset.rgWid, name);
+          return window.WsjfData.upsertRoadmapGroup({ GroupID: meta && meta.GroupID || "", WorkstreamID: gb.dataset.rgWid, Name: name, SortOrder: index + 1 });
         }));
         State.roadmapGroups = await window.WsjfData.readRoadmapGroups(); draggedGroup = null; renderRoadmap();
       });
@@ -3151,6 +3184,8 @@
   // in-progress task changes quarter; cascades the shift to subtask due dates.
   async function commitRoadmapDates(task, ns, ne) {
     if (ne < ns) { const tmp = ns; ns = ne; ne = tmp; }
+    const groupName = taskRoadmapGroup(task), fit = taskFitsGroupEnvelope(task, task.WorkstreamID, groupName, ns, ne);
+    if (!fit.ok) { toast("Task dates must remain inside group “" + groupName + "” (" + formatDateShort(fit.start) + " – " + formatDateShort(fit.end) + "). Resize the group first.", "warn"); rmReRender(); return; }
     const oldStart = isoDate(task.StartDate) || isoDate(task.DueDate) || ns;
     const oldQ = task.Quarter;
     const newQ = quarterOf(ns);
@@ -3303,6 +3338,7 @@
           '<div class="rm-row rm-axis-row rm-focus-timeline-row"><div class="rm-row-track rm-axis-track">' +
             ["Q1", "Q2", "Q3", "Q4"].map((q) => '<span class="rm-qcol' + (q === currentQuarter() ? " current" : "") + '">' + q + '</span>').join("") +
             '<div class="rm-today" style="left:' + todayPct + '%"></div></div></div>' +
+          ((isoDate(groupMeta.StartDate) && isoDate(groupMeta.EndDate)) ? '<div class="rm-row rm-focus-window-row"><div class="rm-row-label">Group window</div><div class="rm-row-track"><div class="rm-focus-window" style="left:' + pctOf(isoDate(groupMeta.StartDate)) + '%;width:' + Math.max(1.5, pctOf(isoDate(groupMeta.EndDate)) - pctOf(isoDate(groupMeta.StartDate))) + '%"><span>' + escapeHtml(formatDateShort(groupMeta.StartDate) + ' – ' + formatDateShort(groupMeta.EndDate)) + '</span></div><div class="rm-today" style="left:' + todayPct + '%"></div></div></div>' : '') +
           rowsHtml +
         '</div></div>' +
         '<div class="rm-dragtip" hidden></div>' +
@@ -3356,8 +3392,10 @@
     const f = State.roadmap.focus;
     if (!f || !newName || newName === f.name) return;
     try {
+      const existingMeta = roadmapGroupRecord(f.wid, f.name);
       for (const t of tasksInGroup(f.wid, f.name)) await window.WsjfData.writeTask({ TaskID: t.TaskID, RoadmapGroup: newName }, { force: true, silent: true });
-      f.name = newName;
+      if (existingMeta) await window.WsjfData.upsertRoadmapGroup({ GroupID: existingMeta.GroupID, WorkstreamID: f.wid, Name: newName });
+      f.name = newName; State.roadmapGroups = await window.WsjfData.readRoadmapGroups();
       await reloadTasks();
       renderGroupFocus();
       toast("Group renamed.", "info");
@@ -3404,7 +3442,14 @@
       if (!btn) return;
       btn.disabled = true;
       try {
+        const adding = State.tasks.find((t) => Number(t.TaskID) === Number(btn.dataset.add));
+        const range = taskEffectiveRange(adding || {}), meta = roadmapGroupRecord(f.wid, f.name);
+        if (meta && range.s && range.e) {
+          const start = isoDate(meta.StartDate), end = isoDate(meta.EndDate);
+          if ((start && range.s < start) || (end && range.e > end)) await window.WsjfData.upsertRoadmapGroup({ GroupID: meta.GroupID, WorkstreamID: f.wid, Name: f.name, StartDate: !start || range.s < start ? range.s : start, EndDate: !end || range.e > end ? range.e : end });
+        }
         await window.WsjfData.writeTask({ TaskID: Number(btn.dataset.add), RoadmapGroup: f.name }, { force: true, silent: true });
+        State.roadmapGroups = await window.WsjfData.readRoadmapGroups();
         await reloadTasks();
         renderGroupFocus();
         box.querySelector("#rf-add-list").innerHTML = rowsHtml();
@@ -5344,6 +5389,7 @@
     if (rgEl) t.RoadmapGroup = rgEl.value.trim();
 
     if (!t.Title) { toast("Title is required.", "warn"); return; }
+    if (t.RoadmapGroup) { const fit = taskFitsGroupEnvelope(t, t.WorkstreamID, t.RoadmapGroup, t.StartDate, t.DueDate); if (!fit.ok) { toast("Task dates must remain inside group “" + t.RoadmapGroup + "” (" + formatDateShort(fit.start) + " – " + formatDateShort(fit.end) + "). Resize the group first.", "warn"); return; } }
     if (!currentTaskGoals().length) { toast("Select at least one objective before saving.", "warn"); return; }
     if (!currentTaskKeyResults().length) { toast("Select at least one key result before saving.", "warn"); return; }
 
@@ -5425,6 +5471,7 @@
       }
 
       await window.WsjfData.syncTaskKeyResultLinks("Task", t.TaskID, currentTaskKeyResults(), State.me.name, isCompleteStatus(t.Status));
+      if (t.RoadmapGroup && !roadmapGroupRecord(t.WorkstreamID, t.RoadmapGroup)) { const range = taskEffectiveRange(t); await window.WsjfData.upsertRoadmapGroup({ WorkstreamID: t.WorkstreamID, Name: t.RoadmapGroup, StartDate: range.s, EndDate: range.e, SortOrder: 9999, Source: "Product Management Tool", Archived: "No" }); State.roadmapGroups = await window.WsjfData.readRoadmapGroups(); }
       modalDirty = false;
       clearTaskDraft();
       State.keyResultLinks = await window.WsjfData.readTaskKeyResultLinks();

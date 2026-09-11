@@ -827,6 +827,7 @@
         return sameName.length === 1 ? sameName[0].idx : -1;
       };
       items.forEach((item) => {
+        if (!String(item.WorkstreamID || "").trim()) throw new Error("Roadmap group “" + String(item.Name || "") + "” could not be matched to an existing workstream.");
         const rowIndex = findIndex(item), payload = { LastUpdated: ts, UpdatedBy: me.name };
         fields.forEach((h) => { if (Object.prototype.hasOwnProperty.call(item, h)) payload[h] = item[h]; });
         if (rowIndex >= 0) {
