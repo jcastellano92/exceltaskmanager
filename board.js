@@ -2597,7 +2597,7 @@
 
   const ROADMUNK_MAP_DEFAULTS = { workstreamField: "Workstream", typeField: "Roadmap Type", portfolioValue: "Portfolio", operationalValue: "Operations" };
   const ROADMUNK_BUSINESS_UNITS = ["Tech and Innovation", "Abiomed", "External Innovation", "Innovative Medicine", "Ottava", "JJT", "DPS"];
-  const ROADMUNK_FUNCTIONS = ["Innovation", "Biz Enhancement", "Tech Enhancement", "Expansion", "Support"];
+  const ROADMUNK_FUNCTIONS = ["Innovation", "Biz Enhancement", "Tech Enhancement", "Expansion", "Support", "Milestone"];
   function roadmunkMap() {
     try {
       const map = Object.assign({}, ROADMUNK_MAP_DEFAULTS, JSON.parse(lsGet("roadmunkFieldMap", "{}")));
@@ -2805,9 +2805,7 @@
 
     let html = '<div class="rm-head"><h2>Roadmap</h2>' +
       '<div class="rm-head-right">' +
-        '<label class="rm-toggle"><input type="checkbox" id="rm-show-dates"' + (State.roadmap.showDates ? " checked" : "") + '> Date tooltip on drag</label>' +
-        '<button class="btn btn-secondary btn-sm" id="rm-import-groups">Import groups</button>' +
-        '<div class="rm-export-wrap"><select id="rm-export-scope" class="rm-export-scope"><option value="all">All groups</option><option value="current">Current tab</option><option value="Portfolio">Portfolio</option><option value="Operations">Operations</option></select><button class="btn btn-secondary btn-sm" id="rm-export-groups">Export CSV</button></div>' +
+        '<div class="rm-data-menu-wrap"><button class="btn btn-secondary btn-sm" id="rm-data-menu-btn" type="button">Import / Export ▾</button><div class="rm-data-menu" id="rm-data-menu" hidden><button type="button" id="rm-import-groups">Import Roadmunk CSV</button><div class="rm-data-menu-export"><select id="rm-export-scope" class="rm-export-scope"><option value="all">All groups</option><option value="current">Current tab</option><option value="Portfolio">Portfolio</option><option value="Operations">Operations</option></select><button type="button" id="rm-export-groups">Export CSV</button></div></div></div>' +
         '<input id="rm-import-file" type="file" accept=".csv,text/csv" hidden>' +
         (State.workstreamLinks.some((x) => String(x.LinkType).toLowerCase() === "roadmunk") ? '<div class="rm-roadmunk-links">' + State.workstreamLinks.filter((x) => String(x.LinkType).toLowerCase() === "roadmunk").slice(0,4).map((x) => '<a class="btn btn-secondary btn-sm" href="' + escapeAttr(x.Url) + '" target="_blank" rel="noopener">Roadmunk · ' + escapeHtml(workstreamName(x.WorkstreamID) || x.Label) + '</a>').join("") + '</div>' : '') +
         '<span class="mine-who">' + escapeHtml(yearStart.slice(0, 4)) + '</span>' +
@@ -2823,36 +2821,12 @@
     html += '<div class="rm-legend">' + legend + '<span class="rm-leg-hint">Drag a bar to move it · drag its edges to resize · click to open · ▸ for subtasks</span></div>';
     html += '<div class="rm-scroll"><div class="rm">';
 
-    // Milestone vertical guide-lines spanning every track (overlay).
-    if (State.milestones && State.milestones.length) {
-      html += '<div class="rm-mslines">' + State.milestones.map((m) => {
-        const d = isoDate(m.Date); if (!d) return "";
-        return '<div class="rm-msline" style="left:' + pctOf(d) + '%;border-color:' + (m.Color || goalColor(m.GoalID)) + '"></div>';
-      }).join("") + '</div>';
-    }
-
     // Axis (quarter columns + today).
     html += '<div class="rm-row rm-axis-row"><div class="rm-row-label">Product</div><div class="rm-row-track rm-axis-track">' +
       ["Q1", "Q2", "Q3", "Q4"].map((q) => '<span class="rm-qcol' + (q === currentQuarter() ? " current" : "") + '">' + q + '</span>').join("") +
       '<div class="rm-today" style="left:' + todayPct + '%" title="Today"></div></div></div>';
 
     // Milestone lane (dated diamonds + labels).
-    if (State.milestones && State.milestones.length) {
-      const flags = State.milestones.slice()
-        .sort((a, b) => (isoDate(a.Date) < isoDate(b.Date) ? -1 : 1))
-        .map((m) => {
-          const d = isoDate(m.Date); if (!d) return "";
-          const col = m.Color || goalColor(m.GoalID);
-          return '<div class="rm-ms-flag" style="left:' + pctOf(d) + '%;--mc:' + col + '" data-ms-id="' + escapeAttr(m.MilestoneID) +
-            '" title="' + escapeAttr((m.Title || "Milestone") + " · " + formatDateShort(d) + (m.Notes ? " · " + m.Notes : "")) + '">' +
-            '<span class="rm-ms-diostamp">◆</span><span class="rm-ms-flaglabel">' + escapeHtml(m.Title || "") + '</span></div>';
-        }).join("");
-      html += '<div class="rm-row rm-ms-row"><div class="rm-row-label rm-ms-rowlabel">◆ Milestones <button class="rm-ms-add" id="rm-add-ms" title="Add a dated milestone line">＋ Add</button></div>' +
-        '<div class="rm-row-track">' + flags + '<div class="rm-today" style="left:' + todayPct + '%"></div></div></div>';
-    } else {
-      html += '<div class="rm-row rm-ms-row"><div class="rm-row-label rm-ms-rowlabel">◆ Milestones <button class="rm-ms-add" id="rm-add-ms" title="Add a dated milestone line">＋ Add</button></div>' +
-        '<div class="rm-row-track"><span class="rm-ms-empty">No milestones — add a dated line</span><div class="rm-today" style="left:' + todayPct + '%"></div></div></div>';
-    }
 
     // One swimlane per workstream: label on the left; the workstream's tasks are
     // PACKED across the quarter timeline (non-overlapping tasks share a row) so the
@@ -2896,6 +2870,8 @@
     // A roadmap group is collapsed into one bar (min start → max end); click to focus.
     const groupBarEl = (g) => {
       const left = pctOf(g.s), width = Math.max(2.5, pctOf(g.e) - left);
+      const calculatedProgress = groupAutoProgress(g.tasks), manualProgress = String(g.meta && g.meta.Progress || "").trim();
+      const groupProgress = manualProgress === "" ? calculatedProgress : Math.max(0, Math.min(100, Number(manualProgress) || 0));
       const counts = {};
       g.tasks.forEach((t) => { const key = String(t.Status || "Unspecified"); counts[key] = (counts[key] || 0) + 1; });
       const composition = boardColumns().filter((s) => counts[s]).map((s) =>
@@ -2903,9 +2879,11 @@
       return '<div class="rm-bar rm-groupbar" style="left:' + left + '%;width:' + width + '%" data-rg-group="' + escapeAttr(g.name) + '" data-rg-wid="' + escapeAttr(g.wid) + '" data-rg-start="' + escapeAttr(g.s) + '" data-rg-end="' + escapeAttr(g.e) + '" data-rg-min="' + escapeAttr(g.contentS) + '" data-rg-max="' + escapeAttr(g.contentE) + '" title="' + escapeAttr("Group: " + g.name + " · " + g.tasks.length + " items · click to open") + '">' +
         '<span class="rm-group-handle rm-group-handle-l" data-rg-grip="l"></span>' +
         '<button class="rm-group-order" type="button" draggable="true" title="Drag to reorder within this workstream">⠿</button>' +
-        '<span class="rm-group-content-range" style="left:' + Math.max(0, ((pctOf(g.contentS) - left) / Math.max(width, .01)) * 100) + '%;width:' + Math.max(1, ((pctOf(g.contentE) - pctOf(g.contentS)) / Math.max(width, .01)) * 100) + '%" title="Task date span"></span>' +
+        '<span class="rm-group-progress-fill" style="width:' + groupProgress + '%"></span>' +
+        '<span class="rm-group-content-range" style="left:' + Math.max(0, ((pctOf(g.contentS) - left) / Math.max(width, .01)) * 100) + '%;width:' + Math.max(1, ((pctOf(g.contentE) - pctOf(g.contentS)) / Math.max(width, .01)) * 100) + '%" title="Actual member-task span"></span>' +
         '<span class="rm-groupbar-icon">▦</span>' +
         '<span class="rm-bar-label">' + escapeHtml(g.name) + ' (' + g.tasks.length + ')</span>' +
+        '<span class="rm-group-pct">' + groupProgress + '%</span>' +
         '<span class="rm-group-composition">' + composition + '</span>' +
         '<span class="rm-groupbar-open">⤢</span>' +
         '<span class="rm-group-handle rm-group-handle-r" data-rg-grip="r"></span></div>';
@@ -3008,6 +2986,8 @@
       el.addEventListener("mouseleave", () => { const card = document.getElementById("rm-hovercard"); if (card) card.hidden = true; });
     });
 
+    const dataMenuBtn = root.querySelector("#rm-data-menu-btn"), dataMenu = root.querySelector("#rm-data-menu");
+    if (dataMenuBtn && dataMenu) dataMenuBtn.addEventListener("click", (e) => { e.stopPropagation(); dataMenu.hidden = !dataMenu.hidden; });
     const importBtn = root.querySelector("#rm-import-groups"), importFile = root.querySelector("#rm-import-file");
     if (importBtn && importFile) {
       importBtn.addEventListener("click", () => importFile.click());
@@ -3024,20 +3004,7 @@
     Array.from(root.querySelectorAll(".rm-tab[data-rm-group]")).forEach((b) => {
       b.addEventListener("click", () => { State.roadmap.group = b.dataset.rmGroup; lsSet("rmGroup", b.dataset.rmGroup); renderRoadmap(); });
     });
-    // Date-tooltip toggle.
-    const showDatesCb = document.getElementById("rm-show-dates");
-    if (showDatesCb) showDatesCb.addEventListener("change", () => { State.roadmap.showDates = showDatesCb.checked; });
-
-    // Add / edit milestones.
-    const addMs = document.getElementById("rm-add-ms");
-    if (addMs) addMs.addEventListener("click", (e) => { e.stopPropagation(); openMilestoneEditor(null); });
-    Array.from(root.querySelectorAll(".rm-ms-flag[data-ms-id]")).forEach((f) => {
-      f.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const m = (State.milestones || []).find((x) => String(x.MilestoneID) === String(f.dataset.msId));
-        if (m) openMilestoneEditor(m);
-      });
-    });
+    // Dates are always shown while dragging.
     // Subtask accordion carets (on the bars).
     Array.from(root.querySelectorAll(".rm-bar-caret[data-rm-exp]")).forEach((c) => {
       c.addEventListener("click", (e) => {
@@ -3058,7 +3025,6 @@
     // Groups use a metadata envelope. It may extend beyond members but never exclude them.
     let draggedGroup = null;
     Array.from(root.querySelectorAll(".rm-groupbar[data-rg-group]")).forEach((gb) => {
-      gb.addEventListener("click", (e) => { if (!e.target.closest(".rm-group-order,.rm-group-handle")) openGroupFocus(gb.dataset.rgWid, gb.dataset.rgGroup); });
       const orderHandle = gb.querySelector(".rm-group-order");
       orderHandle.addEventListener("dragstart", (e) => { draggedGroup = gb; e.dataTransfer.effectAllowed = "move"; e.stopPropagation(); });
       gb.addEventListener("dragover", (e) => { if (draggedGroup && draggedGroup.dataset.rgWid === gb.dataset.rgWid) { e.preventDefault(); gb.classList.add("rm-group-drop"); } });
@@ -3077,6 +3043,40 @@
         State.roadmapGroups = await window.WsjfData.readRoadmapGroups(); draggedGroup = null; renderRoadmap();
       });
       gb.addEventListener("dragend", () => { draggedGroup = null; root.querySelectorAll(".rm-group-drop").forEach((x) => x.classList.remove("rm-group-drop")); });
+      gb.addEventListener("pointerdown", (ev) => {
+        if (ev.button !== 0 || ev.target.closest(".rm-group-handle,.rm-group-order")) return;
+        ev.preventDefault(); ev.stopPropagation();
+        const trackW = gb.parentElement.getBoundingClientRect().width, startX = ev.clientX;
+        const left0 = parseFloat(gb.style.left) || 0, width0 = parseFloat(gb.style.width) || 1;
+        let finalLeft = left0, moved = false;
+        const move = (e) => {
+          const delta = ((e.clientX - startX) / trackW) * 100;
+          if (Math.abs(e.clientX - startX) > 3) moved = true;
+          finalLeft = Math.max(0, Math.min(100 - width0, left0 + delta));
+          gb.style.left = finalLeft + "%";
+          const tip = root.querySelector("#rm-dragtip"); if (tip) { tip.hidden = false; tip.textContent = formatDateShort(isoFromPct(finalLeft)) + " – " + formatDateShort(isoFromPct(finalLeft + width0)); tip.style.left = Math.min(e.clientX + 12, window.innerWidth - 180) + "px"; tip.style.top = Math.max(8, e.clientY - 38) + "px"; }
+        };
+        const up = async () => {
+          document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
+          const tip = root.querySelector("#rm-dragtip"); if (tip) tip.hidden = true;
+          if (!moved) { openGroupFocus(gb.dataset.rgWid, gb.dataset.rgGroup); return; }
+          const oldStart = isoDate(gb.dataset.rgStart), newStart = isoFromPct(finalLeft), newEnd = isoFromPct(finalLeft + width0);
+          const deltaMs = new Date(newStart + "T00:00:00").getTime() - new Date(oldStart + "T00:00:00").getTime();
+          const meta = roadmapGroupRecord(gb.dataset.rgWid, gb.dataset.rgGroup) || { WorkstreamID: gb.dataset.rgWid, Name: gb.dataset.rgGroup };
+          try {
+            await window.WsjfData.upsertRoadmapGroup({ GroupID: meta.GroupID || "", WorkstreamID: gb.dataset.rgWid, Name: gb.dataset.rgGroup, StartDate: newStart, EndDate: newEnd });
+            for (const task of tasksInGroup(gb.dataset.rgWid, gb.dataset.rgGroup)) {
+              const range = taskEffectiveRange(task), shiftedStart = range.s ? shiftIso(range.s, deltaMs) : "", shiftedEnd = range.e ? shiftIso(range.e, deltaMs) : "";
+              const updates = { TaskID: task.TaskID, StartDate: shiftedStart, DueDate: shiftedEnd };
+              const quarter = quarterOf(shiftedStart); if (quarter) updates.Quarter = quarter;
+              await window.WsjfData.writeTask(updates, { force: true, silent: true });
+              for (const sub of (State.subtasksByParent[task.TaskID] || [])) if (sub.SubtaskID && sub.DueDate) await window.WsjfData.writeSubtask({ SubtaskID: sub.SubtaskID, DueDate: shiftIso(sub.DueDate, deltaMs) });
+            }
+            State.roadmapGroups = await window.WsjfData.readRoadmapGroups(); await reloadTasks(); renderRoadmap(); toast("Group and member dates moved together.", "info");
+          } catch (error) { toast("Group move failed: " + error.message, "error"); await reloadTasks(); renderRoadmap(); }
+        };
+        document.addEventListener("pointermove", move); document.addEventListener("pointerup", up, { once: true });
+      });
       gb.querySelectorAll(".rm-group-handle").forEach((handle) => handle.addEventListener("pointerdown", (ev) => {
         ev.preventDefault(); ev.stopPropagation();
         const trackW = gb.parentElement.getBoundingClientRect().width, startX = ev.clientX;
@@ -3127,7 +3127,7 @@
         let s = isoDate(t.StartDate), e = isoDate(t.DueDate), q = State.quarterDates[t.Quarter];
         if (!s) s = q ? isoDate(q.start) : e; if (!e) e = q ? isoDate(q.end) : s; return { s: s, e: e };
       }).filter((r) => r.s && r.e);
-      await window.WsjfData.upsertRoadmapGroup({ WorkstreamID: wid, Name: name, StartDate: ranges.map((r) => r.s).sort()[0] || "", EndDate: ranges.map((r) => r.e).sort().slice(-1)[0] || "", SortOrder: 9999, Source: "Product Management Tool" });
+      await window.WsjfData.upsertRoadmapGroup({ WorkstreamID: wid, Name: name, StartDate: ranges.map((range) => range.s).sort()[0] || "", EndDate: ranges.map((range) => range.e).sort().slice(-1)[0] || "", Progress: "", SortOrder: 9999, Source: "Product Management Tool", Archived: "No" });
       State.roadmapGroups = await window.WsjfData.readRoadmapGroups();
       State.roadmap.selected.clear();
       await reloadTasks();
@@ -3168,7 +3168,7 @@
   function wireRoadmapDrag(bar, task, ctx) {
     bar.addEventListener("pointerdown", (ev) => {
       if (ev.button !== 0) return;
-      if (ev.target.closest(".rm-bar-caret")) return;   // caret toggles subtasks, never drags
+      if (ev.target.closest(".rm-bar-caret,.rm-focus-caret")) return;   // caret toggles subtasks, never drags
       // Ctrl/Cmd+click = multi-select for grouping (no drag, no open).
       if (ev.ctrlKey || ev.metaKey) {
         ev.preventDefault();
@@ -3203,7 +3203,7 @@
         else if (mode === "resize-l") { nl = Math.max(0, Math.min(left0 + width0 - 1, left0 + dPct)); nw = (left0 + width0) - nl; }
         else { nw = Math.max(1, Math.min(100 - left0, width0 + dPct)); }
         bar.style.left = nl + "%"; bar.style.width = nw + "%";
-        if (State.roadmap.showDates && tip) {
+        if (tip) {
           const ns = ctx.isoFromPct(nl), ne = ctx.isoFromPct(nl + nw);
           tip.textContent = formatDateShort(ns) + " – " + formatDateShort(ne);
           tip.hidden = false;
@@ -3302,11 +3302,30 @@
     document.body.classList.remove("rm-focus-open");
     renderRoadmap();
   }
+  function groupAutoProgress(members) {
+    members = members || [];
+    if (!members.length) return 0;
+    const weighted = members.filter((task) => Number(task.JobSize) > 0);
+    const value = weighted.length
+      ? weighted.reduce((sum, task) => sum + Number(task.JobSize) * Math.max(0, Math.min(100, Number(task.PercentComplete) || 0)), 0) / weighted.reduce((sum, task) => sum + Number(task.JobSize), 0)
+      : members.reduce((sum, task) => sum + Math.max(0, Math.min(100, Number(task.PercentComplete) || 0)), 0) / members.length;
+    return Math.round(value);
+  }
+  function roadmapPeopleHtml(task) {
+    const owner = String(task.Owner || "").trim();
+    const contributors = splitMulti(task.Contributors || "").filter((name) => name && name !== owner);
+    const people = (owner ? [{ name: owner, owner: true }] : []).concat(contributors.map((name) => ({ name: name, owner: false })));
+    if (!people.length) return "";
+    return '<div class="rm-task-people">' + people.slice(0, 5).map((person) => '<span class="rm-person-avatar' + (person.owner ? ' owner' : '') + '" style="background:' + colorHash(person.name) + '" title="' + escapeAttr((person.owner ? 'Owner: ' : 'Contributor: ') + person.name) + '">' + initialsFromName(person.name) + '</span>').join("") + (people.length > 5 ? '<span class="rm-person-more">+' + (people.length - 5) + '</span>' : '') + '</div>';
+  }
+
   function renderGroupFocus() {
     const f = State.roadmap.focus;
     if (!f) return;
     const members = tasksInGroup(f.wid, f.name);
     const groupMeta = roadmapGroupRecord(f.wid, f.name) || { WorkstreamID: f.wid, Name: f.name };
+    const autoProgress = groupAutoProgress(members), hasManualProgress = String(groupMeta.Progress || "").trim() !== "";
+    const shownProgress = hasManualProgress ? Math.max(0, Math.min(100, Number(groupMeta.Progress) || 0)) : autoProgress;
     let host = document.getElementById("rm-focus");
     if (!host) {
       host = document.createElement("div");
@@ -3357,7 +3376,7 @@
       const bar = '<div class="rm-bar rm-focus-taskbar' + hl + blocked + '" style="left:' + left + '%;width:' + width + '%;--task-status:' + escapeAttr(statusColor(t.Status)) + '" data-task-id="' + t.TaskID + '" title="' + escapeAttr(t.Title + " · " + (t.Status || "")) + '">' +
         '<span class="rm-handle rm-handle-l" data-grip="l"></span>' +
         '<span class="rm-bar-fill" style="width:' + pct + '%"></span>' + caret + scheduleChip(t) +
-        '<span class="rm-bar-label">' + escapeHtml(t.Title || "") + '</span>' +
+        '<span class="rm-focus-title-stack"><span class="rm-bar-label">' + escapeHtml(t.Title || "") + '</span>' + roadmapPeopleHtml(t) + '</span>' +
         '<span class="rm-task-status-dot" title="' + escapeAttr(t.Status || "") + '"></span>' +
         '<span class="rm-handle rm-handle-r" data-grip="r"></span></div>';
       return '<div class="rm-focus-taskwrap"><div class="rm-row rm-focus-timeline-row" data-task-id="' + t.TaskID + '"><div class="rm-row-track">' + bar + '<div class="rm-today" style="left:' + todayPct + '%"></div></div></div>' + (expanded ? '<div class="rm-focus-subtasks">' + focusSubtaskRows(t) + '</div>' : '') + '</div>';
@@ -3367,17 +3386,17 @@
       '<div class="rm-focus">' +
         '<header class="rm-focus-head">' +
           '<div class="rf-heading"><input id="rf-title" class="rm-focus-title" value="' + escapeAttr(f.name) + '" title="Rename group" /><span class="rm-focus-meta">' + escapeHtml(workstreamName(f.wid)) + ' · ' + members.length + ' item' + (members.length === 1 ? "" : "s") + '</span></div>' +
-          '<div class="rf-primary-actions"><button class="btn btn-primary btn-sm" id="rf-add">+ Add task</button><button class="btn btn-secondary btn-sm" id="rf-fields-toggle">Details</button>' +
+          '<div class="rf-primary-actions"><button class="btn btn-primary btn-sm" id="rf-add">+ Add task</button><button class="btn btn-secondary btn-sm rf-details-toggle" id="rf-fields-toggle" aria-expanded="true">Details <span>⌄</span></button>' +
             '<div class="rf-ai-wrap"><button class="btn btn-secondary btn-sm" id="rf-ai" title="Create a context-rich prompt from the group tasks">✨ AI</button><div class="rf-ai-menu" id="rf-ai-menu" hidden><div class="rf-ai-head">Group assistance</div><button class="rf-ai-item" data-ai="name">Suggest a concise group name</button></div></div>' +
             '<div class="rf-more-wrap"><button class="btn btn-secondary btn-sm" id="rf-more" type="button">More ▾</button><div class="rf-more-menu" id="rf-more-menu" hidden><button id="rf-export" type="button">Export this group</button><button id="rf-fit" type="button">Fit dates to tasks</button><button id="rf-ungroup" class="danger" type="button">Ungroup tasks</button></div></div>' +
             '<button class="close-btn" id="rf-close" type="button" aria-label="Close">×</button></div>' +
         '</header>' +
-        '<section class="rf-fields" id="rf-fields" hidden>' +
-          '<div class="rf-section rf-overview"><h3>Overview</h3><label>Description<textarea id="rf-description" rows="3">' + escapeHtml(groupMeta.Description || "") + '</textarea></label><label>Progress<input id="rf-progress" value="' + escapeAttr(groupMeta.Progress || "") + '"></label><label>Business value<input id="rf-business-value" value="' + escapeAttr(groupMeta.BusinessValue || "") + '"></label></div>' +
+        '<section class="rf-fields" id="rf-fields">' +
+          '<div class="rf-section rf-overview"><h3>Overview</h3><label>Description<textarea id="rf-description" rows="3">' + escapeHtml(groupMeta.Description || "") + '</textarea></label><div class="rf-progress-editor"><div class="rf-progress-head"><label>Progress</label><strong id="rf-progress-value">' + shownProgress + '%</strong></div><input id="rf-progress" type="range" min="0" max="100" step="1" value="' + shownProgress + '"' + (!hasManualProgress ? ' disabled' : '') + '><label class="rf-auto-progress"><input id="rf-progress-auto" type="checkbox"' + (!hasManualProgress ? ' checked' : '') + '> Auto-calculate from group items</label></div><label>Business value<input id="rf-business-value" value="' + escapeAttr(groupMeta.BusinessValue || "") + '"></label></div>' +
           '<div class="rf-section"><h3>Schedule</h3><label>Start date<input id="rf-start" type="date" value="' + escapeAttr(isoDate(groupMeta.StartDate) || "") + '"></label><label>End date<input id="rf-end" type="date" value="' + escapeAttr(isoDate(groupMeta.EndDate) || "") + '"></label><p class="rf-help">The group may extend beyond its tasks, but cannot exclude a task date.</p></div>' +
           '<div class="rf-section"><h3>Classification</h3><label>Function<select id="rf-function">' + optionMarkup(ROADMUNK_FUNCTIONS, groupMeta.Function || "") + '</select></label><label>Business unit<select id="rf-business-unit">' + optionMarkup(ROADMUNK_BUSINESS_UNITS, groupMeta.BusinessUnit || "") + '</select></label></div>' +
           '<div class="rf-section"><h3>Roadmunk mapping</h3><label>Source<input id="rf-source" value="' + escapeAttr(groupMeta.Source || "") + '"></label><label>Roadmunk ID<input id="rf-roadmunk-id" value="' + escapeAttr(groupMeta.RoadmunkID || "") + '"></label><label>External ID<input id="rf-external-id" value="' + escapeAttr(groupMeta.ExternalID || "") + '"></label></div>' +
-          '<footer class="rf-fields-footer"><span id="rf-fields-state">Changes are saved when you choose Save.</span><button class="btn btn-secondary btn-sm" id="rf-fit-fields" type="button">Fit to tasks</button><button class="btn btn-primary" id="rf-save-fields">Save details</button></footer>' +
+          '<footer class="rf-fields-footer"><span id="rf-fields-state">Changes are saved when you choose Save.</span><button class="btn btn-primary" id="rf-save-fields">Save details</button></footer>' +
         '</section>' +
         '<div class="rm-legend">' + legend + '<span class="rm-leg-hint">Drag bars to change dates · drag edges to resize · click a bar to open</span></div>' +
         '<div class="rm-scroll"><div class="rm">' +
@@ -3395,7 +3414,11 @@
     host.onkeydown = (e) => { if (e.key === "Escape" && !State.modalOpen) { e.preventDefault(); closeGroupFocus(); } };
     host.tabIndex = -1; host.focus({ preventScroll: true });
     const fields = host.querySelector("#rf-fields");
-    host.querySelector("#rf-fields-toggle").addEventListener("click", () => { fields.hidden = !fields.hidden; });
+    const fieldsToggle = host.querySelector("#rf-fields-toggle");
+    fieldsToggle.addEventListener("click", () => { fields.hidden = !fields.hidden; fieldsToggle.setAttribute("aria-expanded", String(!fields.hidden)); fieldsToggle.querySelector("span").textContent = fields.hidden ? "›" : "⌄"; });
+    const progressSlider = host.querySelector("#rf-progress"), progressAuto = host.querySelector("#rf-progress-auto"), progressValue = host.querySelector("#rf-progress-value");
+    progressSlider.addEventListener("input", () => { progressValue.textContent = progressSlider.value + "%"; });
+    progressAuto.addEventListener("change", () => { progressSlider.disabled = progressAuto.checked; if (progressAuto.checked) { progressSlider.value = String(autoProgress); progressValue.textContent = autoProgress + "%"; } });
     const moreBtn = host.querySelector("#rf-more"), moreMenu = host.querySelector("#rf-more-menu");
     moreBtn.addEventListener("click", (e) => { e.stopPropagation(); moreMenu.hidden = !moreMenu.hidden; });
     const fitToTasks = () => {
@@ -3405,12 +3428,11 @@
       fields.hidden = false; host.querySelector("#rf-fields-state").textContent = "Dates fitted to the earliest and latest task. Save to apply.";
     };
     host.querySelector("#rf-fit").addEventListener("click", () => { moreMenu.hidden = true; fitToTasks(); });
-    host.querySelector("#rf-fit-fields").addEventListener("click", fitToTasks);
     host.querySelector("#rf-export").addEventListener("click", () => { moreMenu.hidden = true; exportRoadmapGroups([groupMeta], "roadmap-group.csv"); });
     host.querySelector("#rf-save-fields").addEventListener("click", async () => {
       const btn = host.querySelector("#rf-save-fields"); btn.disabled = true; btn.textContent = "Saving…";
       try {
-        await window.WsjfData.upsertRoadmapGroup({ GroupID:groupMeta.GroupID||"", WorkstreamID:f.wid, Name:host.querySelector("#rf-title").value.trim(), Description:host.querySelector("#rf-description").value, StartDate:host.querySelector("#rf-start").value, EndDate:host.querySelector("#rf-end").value, Progress:host.querySelector("#rf-progress").value, BusinessValue:host.querySelector("#rf-business-value").value, Function:host.querySelector("#rf-function").value, BusinessUnit:host.querySelector("#rf-business-unit").value, Source:host.querySelector("#rf-source").value, RoadmunkID:host.querySelector("#rf-roadmunk-id").value, ExternalID:host.querySelector("#rf-external-id").value });
+        await window.WsjfData.upsertRoadmapGroup({ GroupID:groupMeta.GroupID||"", WorkstreamID:f.wid, Name:host.querySelector("#rf-title").value.trim(), Description:host.querySelector("#rf-description").value, StartDate:host.querySelector("#rf-start").value, EndDate:host.querySelector("#rf-end").value, Progress:host.querySelector("#rf-progress-auto").checked ? "" : host.querySelector("#rf-progress").value, BusinessValue:host.querySelector("#rf-business-value").value, Function:host.querySelector("#rf-function").value, BusinessUnit:host.querySelector("#rf-business-unit").value, Source:host.querySelector("#rf-source").value, RoadmunkID:host.querySelector("#rf-roadmunk-id").value, ExternalID:host.querySelector("#rf-external-id").value });
         State.roadmapGroups = await window.WsjfData.readRoadmapGroups(); toast("Group details saved.", "info"); renderGroupFocus();
       } catch (e) { toast("Group save failed: " + e.message, "error"); btn.disabled = false; btn.textContent = "Save group details"; }
     });
