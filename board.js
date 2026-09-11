@@ -2595,10 +2595,17 @@
     });
   }
 
-  const ROADMUNK_MAP_DEFAULTS = { workstreamField: "Workstream", typeField: "Roadmap Type", portfolioValue: "Portfolio", operationalValue: "Operational" };
+  const ROADMUNK_MAP_DEFAULTS = { workstreamField: "Workstream", typeField: "Roadmap Type", portfolioValue: "Portfolio", operationalValue: "Operations" };
+  const ROADMUNK_BUSINESS_UNITS = ["Tech and Innovation", "Abiomed", "External Innovation", "Innovative Medicine", "Ottava", "JJT", "DPS"];
+  const ROADMUNK_FUNCTIONS = ["Innovation", "Biz Enhancement", "Tech Enhancement", "Expansion", "Support"];
   function roadmunkMap() {
-    try { return Object.assign({}, ROADMUNK_MAP_DEFAULTS, JSON.parse(lsGet("roadmunkFieldMap", "{}"))); }
-    catch (_) { return Object.assign({}, ROADMUNK_MAP_DEFAULTS); }
+    try {
+      const map = Object.assign({}, ROADMUNK_MAP_DEFAULTS, JSON.parse(lsGet("roadmunkFieldMap", "{}")));
+      // Older saved settings used "Operational". Normalize once so exports align
+      // with the workbook's Portfolio / Operations grouping without manual cleanup.
+      if (String(map.operationalValue || "").trim().toLowerCase() === "operational") map.operationalValue = "Operations";
+      return map;
+    } catch (_) { return Object.assign({}, ROADMUNK_MAP_DEFAULTS); }
   }
   function saveRoadmunkMap(map) { lsSet("roadmunkFieldMap", JSON.stringify(Object.assign({}, ROADMUNK_MAP_DEFAULTS, map || {}))); }
   function workstreamForRoadmunkValue(value, typeValue) {
@@ -2622,7 +2629,7 @@
   }
   function roadmapGroupCsvHeaders() {
     const map = roadmunkMap();
-    return ["Internal ID","External ID","Source","Item (REQUIRED)","Description","Start Date","End Date","Progress","Business Value","Function","Business Unit","_Category","XR","Bucket",map.workstreamField,map.typeField];
+    return ["Internal ID","External ID","Item (REQUIRED)","Description","Start Date","End Date","Quarter","Status","Progress","Business Value","Business Unit","Function",map.workstreamField,map.typeField];
   }
   function roadmapGroupRecord(wid, name) {
     return (State.roadmapGroups || []).find((r) => String(r.WorkstreamID || "") === String(wid || "") && String(r.Name || "").trim().toLowerCase() === String(name || "").trim().toLowerCase()) || null;
@@ -2638,16 +2645,55 @@
       else cell += ch;
     }
     row.push(cell); if (row.some(Boolean)) rows.push(row); if (!rows.length) return [];
-    const headers = rows.shift().map((h) => h.trim());
-    return rows.map((values) => { const o = {}; headers.forEach((h, i) => { o[h] = values[i] || ""; }); return o; });
+    const headers = rows.shift().map((header) => header.trim());
+    return rows.map((values) => { const item = {}; headers.forEach((header, i) => { item[header] = values[i] || ""; }); return item; });
   }
   function downloadText(name, text) {
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
     a.download = name; document.body.appendChild(a); a.click(); URL.revokeObjectURL(a.href); a.remove();
   }
+  function groupQuarterLabel(start, end) {
+    const first = quarterOf(isoDate(start)), last = quarterOf(isoDate(end));
+    if (first && last) return first === last ? first : first + "-" + last;
+    return first || last || "";
+  }
+  function groupCalculatedProgress(g) {
+    const tasks = tasksInGroup(g.WorkstreamID, g.Name);
+    if (!tasks.length) return g.Progress || "";
+    const weighted = tasks.filter((task) => Number(task.JobSize) > 0);
+    const value = weighted.length
+      ? weighted.reduce((sum, task) => sum + Number(task.JobSize) * Math.max(0, Math.min(100, Number(task.PercentComplete) || 0)), 0) / weighted.reduce((sum, task) => sum + Number(task.JobSize), 0)
+      : tasks.reduce((sum, task) => sum + Math.max(0, Math.min(100, Number(task.PercentComplete) || 0)), 0) / tasks.length;
+    return Math.round(value);
+  }
+  function groupExportStatus(g, progress) {
+    const tasks = tasksInGroup(g.WorkstreamID, g.Name);
+    if (tasks.length && tasks.every((task) => isCompleteStatus(task.Status))) return "Complete";
+    if (Number(progress) >= 100) return "Complete";
+    const start = isoDate(g.StartDate), end = isoDate(g.EndDate), today = new Date().toISOString().slice(0, 10);
+    if (start && start > today) return "Planned";
+    if ((start && start <= today) || (end && end <= isoDate((State.quarterDates[currentQuarter()] || {}).end))) return "In Progress";
+    return "Planned";
+  }
   function groupCsvRow(g) {
-    const w = State.workstreams.find((x) => String(x.WorkstreamID || "") === String(g.WorkstreamID || ""));
-    return [g.RoadmunkID || "",g.ExternalID || "",g.Source || "XR",g.Name,g.Description,isoDate(g.StartDate),isoDate(g.EndDate),g.Progress,g.BusinessValue,g.Function,g.BusinessUnit,g.Category,g.XR,g.Bucket,(w && (w.Name || w.WorkstreamID)) || g.WorkstreamID || "",roadmunkTypeForWorkstream(g.WorkstreamID)];
+    const w = State.workstreams.find((item) => String(item.WorkstreamID || "") === String(g.WorkstreamID || ""));
+    const progress = groupCalculatedProgress(g);
+    return [
+      g.RoadmunkID || "",
+      g.ExternalID || g.GroupID || "",
+      g.Name,
+      g.Description || "",
+      isoDate(g.StartDate),
+      isoDate(g.EndDate),
+      groupQuarterLabel(g.StartDate, g.EndDate),
+      groupExportStatus(g, progress),
+      progress,
+      g.BusinessValue || "",
+      g.BusinessUnit || "",
+      g.Function || "",
+      (w && (w.Name || w.WorkstreamID)) || g.WorkstreamID || "",
+      roadmunkTypeForWorkstream(g.WorkstreamID)
+    ];
   }
   function allRoadmapGroupRecords() {
     const map = new Map();
@@ -2695,7 +2741,7 @@
           const bu = r["Business Unit"] || "";
           const laneValue = r[map.workstreamField] || r["Workstream ID"] || bu;
           const ws = workstreamForRoadmunkValue(laneValue, r[map.typeField]);
-          return { RoadmunkID:r["Internal ID"]||"", ExternalID:r["External ID"]||"", Source:r.Source||"Roadmunk", Name:r["Item (REQUIRED)"]||r.Item||"", Description:r.Description||"", StartDate:r["Start Date"]||"", EndDate:r["End Date"]||"", Progress:r.Progress||"", BusinessValue:r["Business Value"]||"", Function:r.Function||"", BusinessUnit:bu, Category:r._Category||r.Category||"", XR:r.XR||"", Bucket:r.Bucket||"", WorkstreamID:(ws&&ws.WorkstreamID)||"" };
+          return { RoadmunkID:r["Internal ID"]||"", ExternalID:r["External ID"]||"", Source:r.Source||"Roadmunk", Name:r["Item (REQUIRED)"]||r.Item||"", Description:r.Description||"", StartDate:r["Start Date"]||"", EndDate:r["End Date"]||"", Progress:r.Progress||"", BusinessValue:r["Business Value"]||"", Function:r.Function||"", BusinessUnit:bu, WorkstreamID:(ws&&ws.WorkstreamID)||"" };
         }).filter((g) => g.Name);
         await window.WsjfData.importRoadmapGroups(items); State.roadmapGroups = await window.WsjfData.readRoadmapGroups(); renderRoadmap(); toast("Imported " + items.length + " group item(s).", "info");
       } catch (e) { toast("Import failed: " + e.message, "error"); }
@@ -3329,7 +3375,7 @@
         '<section class="rf-fields" id="rf-fields" hidden>' +
           '<div class="rf-section rf-overview"><h3>Overview</h3><label>Description<textarea id="rf-description" rows="3">' + escapeHtml(groupMeta.Description || "") + '</textarea></label><label>Progress<input id="rf-progress" value="' + escapeAttr(groupMeta.Progress || "") + '"></label><label>Business value<input id="rf-business-value" value="' + escapeAttr(groupMeta.BusinessValue || "") + '"></label></div>' +
           '<div class="rf-section"><h3>Schedule</h3><label>Start date<input id="rf-start" type="date" value="' + escapeAttr(isoDate(groupMeta.StartDate) || "") + '"></label><label>End date<input id="rf-end" type="date" value="' + escapeAttr(isoDate(groupMeta.EndDate) || "") + '"></label><p class="rf-help">The group may extend beyond its tasks, but cannot exclude a task date.</p></div>' +
-          '<div class="rf-section"><h3>Classification</h3><label>Function<input id="rf-function" value="' + escapeAttr(groupMeta.Function || "") + '"></label><label>Business unit<input id="rf-business-unit" value="' + escapeAttr(groupMeta.BusinessUnit || "") + '"></label><label>Category<input id="rf-category" value="' + escapeAttr(groupMeta.Category || "") + '"></label><label>XR<input id="rf-xr" value="' + escapeAttr(groupMeta.XR || "") + '"></label><label>Bucket<input id="rf-bucket" value="' + escapeAttr(groupMeta.Bucket || "") + '"></label></div>' +
+          '<div class="rf-section"><h3>Classification</h3><label>Function<select id="rf-function">' + optionMarkup(ROADMUNK_FUNCTIONS, groupMeta.Function || "") + '</select></label><label>Business unit<select id="rf-business-unit">' + optionMarkup(ROADMUNK_BUSINESS_UNITS, groupMeta.BusinessUnit || "") + '</select></label></div>' +
           '<div class="rf-section"><h3>Roadmunk mapping</h3><label>Source<input id="rf-source" value="' + escapeAttr(groupMeta.Source || "") + '"></label><label>Roadmunk ID<input id="rf-roadmunk-id" value="' + escapeAttr(groupMeta.RoadmunkID || "") + '"></label><label>External ID<input id="rf-external-id" value="' + escapeAttr(groupMeta.ExternalID || "") + '"></label></div>' +
           '<footer class="rf-fields-footer"><span id="rf-fields-state">Changes are saved when you choose Save.</span><button class="btn btn-secondary btn-sm" id="rf-fit-fields" type="button">Fit to tasks</button><button class="btn btn-primary" id="rf-save-fields">Save details</button></footer>' +
         '</section>' +
@@ -3364,7 +3410,7 @@
     host.querySelector("#rf-save-fields").addEventListener("click", async () => {
       const btn = host.querySelector("#rf-save-fields"); btn.disabled = true; btn.textContent = "Saving…";
       try {
-        await window.WsjfData.upsertRoadmapGroup({ GroupID:groupMeta.GroupID||"", WorkstreamID:f.wid, Name:host.querySelector("#rf-title").value.trim(), Description:host.querySelector("#rf-description").value, StartDate:host.querySelector("#rf-start").value, EndDate:host.querySelector("#rf-end").value, Progress:host.querySelector("#rf-progress").value, BusinessValue:host.querySelector("#rf-business-value").value, Function:host.querySelector("#rf-function").value, BusinessUnit:host.querySelector("#rf-business-unit").value, Category:host.querySelector("#rf-category").value, XR:host.querySelector("#rf-xr").value, Bucket:host.querySelector("#rf-bucket").value, Source:host.querySelector("#rf-source").value, RoadmunkID:host.querySelector("#rf-roadmunk-id").value, ExternalID:host.querySelector("#rf-external-id").value });
+        await window.WsjfData.upsertRoadmapGroup({ GroupID:groupMeta.GroupID||"", WorkstreamID:f.wid, Name:host.querySelector("#rf-title").value.trim(), Description:host.querySelector("#rf-description").value, StartDate:host.querySelector("#rf-start").value, EndDate:host.querySelector("#rf-end").value, Progress:host.querySelector("#rf-progress").value, BusinessValue:host.querySelector("#rf-business-value").value, Function:host.querySelector("#rf-function").value, BusinessUnit:host.querySelector("#rf-business-unit").value, Source:host.querySelector("#rf-source").value, RoadmunkID:host.querySelector("#rf-roadmunk-id").value, ExternalID:host.querySelector("#rf-external-id").value });
         State.roadmapGroups = await window.WsjfData.readRoadmapGroups(); toast("Group details saved.", "info"); renderGroupFocus();
       } catch (e) { toast("Group save failed: " + e.message, "error"); btn.disabled = false; btn.textContent = "Save group details"; }
     });
@@ -3669,12 +3715,12 @@
     const sec = document.createElement("section");
     sec.className = "config-section roadmunk-settings";
     sec.innerHTML = '<div class="config-section-head"><div><h3>Roadmunk import and export</h3>' +
-      '<p class="muted">Configure the two Roadmunk custom-field column names. Workstream values come from the existing workstream name; roadmap type comes from WorkstreamsTable.Group.</p></div></div>' +
+      '<p class="muted">Configure the Roadmunk fields used to reproduce the Excel roadmap. Workstream values use the Excel workstream name. Roadmap Type exports as Portfolio or Operations.</p></div></div>' +
       '<div class="roadmunk-map-grid">' +
         '<label>Workstream custom field<input id="cfg-rm-workstream" value="' + escapeAttr(map.workstreamField) + '"></label>' +
-        '<label>Portfolio / operational custom field<input id="cfg-rm-type" value="' + escapeAttr(map.typeField) + '"></label>' +
+        '<label>Portfolio / Operations custom field<input id="cfg-rm-type" value="' + escapeAttr(map.typeField) + '"></label>' +
         '<label>Portfolio exported value<input id="cfg-rm-portfolio" value="' + escapeAttr(map.portfolioValue) + '"></label>' +
-        '<label>Operational exported value<input id="cfg-rm-operational" value="' + escapeAttr(map.operationalValue) + '"></label>' +
+        '<label>Operations exported value<input id="cfg-rm-operational" value="' + escapeAttr(map.operationalValue) + '"></label>' +
       '</div><div class="config-actions"><button class="btn btn-primary btn-sm" id="cfg-rm-save">Save Roadmunk mapping</button></div>' +
       '<p class="zoom-help">Imports update by Roadmunk Internal ID, External ID, or matching workstream plus group name. Imports only join existing workstreams and do not create new lanes.</p>';
     sec.querySelector("#cfg-rm-save").addEventListener("click", () => {
