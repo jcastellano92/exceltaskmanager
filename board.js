@@ -2881,9 +2881,8 @@
         '<button class="rm-group-order" type="button" draggable="true" title="Drag to reorder within this workstream">⠿</button>' +
         '<span class="rm-group-progress-fill" style="width:' + groupProgress + '%"></span>' +
         '<span class="rm-group-content-range" style="left:' + Math.max(0, ((pctOf(g.contentS) - left) / Math.max(width, .01)) * 100) + '%;width:' + Math.max(1, ((pctOf(g.contentE) - pctOf(g.contentS)) / Math.max(width, .01)) * 100) + '%" title="Actual member-task span"></span>' +
-        '<span class="rm-groupbar-icon">▦</span>' +
-        '<span class="rm-bar-label">' + escapeHtml(g.name) + ' (' + g.tasks.length + ')</span>' +
-        '<span class="rm-group-pct">' + groupProgress + '%</span>' +
+        roadmapGroupPeopleHtml(g.tasks) +
+        '<span class="rm-bar-label" title="' + escapeAttr(g.name) + '">' + escapeHtml(g.name) + ' (' + g.tasks.length + ')</span>' +
         '<span class="rm-group-composition">' + composition + '</span>' +
         '<span class="rm-groupbar-open">⤢</span>' +
         '<span class="rm-group-handle rm-group-handle-r" data-rg-grip="r"></span></div>';
@@ -3043,15 +3042,19 @@
         State.roadmapGroups = await window.WsjfData.readRoadmapGroups(); draggedGroup = null; renderRoadmap();
       });
       gb.addEventListener("dragend", () => { draggedGroup = null; root.querySelectorAll(".rm-group-drop").forEach((x) => x.classList.remove("rm-group-drop")); });
+      gb.addEventListener("click", (ev) => {
+        if (ev.target.closest(".rm-group-handle,.rm-group-order") || gb.dataset.suppressClick === "1") return;
+        openGroupFocus(gb.dataset.rgWid, gb.dataset.rgGroup);
+      });
       gb.addEventListener("pointerdown", (ev) => {
         if (ev.button !== 0 || ev.target.closest(".rm-group-handle,.rm-group-order")) return;
-        ev.preventDefault(); ev.stopPropagation();
+        ev.stopPropagation();
         const trackW = gb.parentElement.getBoundingClientRect().width, startX = ev.clientX;
         const left0 = parseFloat(gb.style.left) || 0, width0 = parseFloat(gb.style.width) || 1;
         let finalLeft = left0, moved = false;
         const move = (e) => {
           const delta = ((e.clientX - startX) / trackW) * 100;
-          if (Math.abs(e.clientX - startX) > 3) moved = true;
+          if (Math.abs(e.clientX - startX) > 5) { moved = true; gb.dataset.suppressClick = "1"; e.preventDefault(); }
           finalLeft = Math.max(0, Math.min(100 - width0, left0 + delta));
           gb.style.left = finalLeft + "%";
           const tip = root.querySelector("#rm-dragtip"); if (tip) { tip.hidden = false; tip.textContent = formatDateShort(isoFromPct(finalLeft)) + " – " + formatDateShort(isoFromPct(finalLeft + width0)); tip.style.left = Math.min(e.clientX + 12, window.innerWidth - 180) + "px"; tip.style.top = Math.max(8, e.clientY - 38) + "px"; }
@@ -3059,7 +3062,8 @@
         const up = async () => {
           document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
           const tip = root.querySelector("#rm-dragtip"); if (tip) tip.hidden = true;
-          if (!moved) { openGroupFocus(gb.dataset.rgWid, gb.dataset.rgGroup); return; }
+          if (!moved) return;
+          setTimeout(() => { delete gb.dataset.suppressClick; }, 0);
           const oldStart = isoDate(gb.dataset.rgStart), newStart = isoFromPct(finalLeft), newEnd = isoFromPct(finalLeft + width0);
           const deltaMs = new Date(newStart + "T00:00:00").getTime() - new Date(oldStart + "T00:00:00").getTime();
           const meta = roadmapGroupRecord(gb.dataset.rgWid, gb.dataset.rgGroup) || { WorkstreamID: gb.dataset.rgWid, Name: gb.dataset.rgGroup };
@@ -3311,6 +3315,20 @@
       : members.reduce((sum, task) => sum + Math.max(0, Math.min(100, Number(task.PercentComplete) || 0)), 0) / members.length;
     return Math.round(value);
   }
+  function roadmapGroupPeopleHtml(tasks) {
+    const seen = new Set(), people = [];
+    (tasks || []).forEach((task) => {
+      const owner = String(task.Owner || "").trim();
+      if (owner && !seen.has(owner.toLowerCase())) { seen.add(owner.toLowerCase()); people.push({ name: owner, owner: true }); }
+    });
+    (tasks || []).forEach((task) => splitMulti(task.Contributors || "").forEach((name) => {
+      name = String(name || "").trim();
+      if (name && !seen.has(name.toLowerCase())) { seen.add(name.toLowerCase()); people.push({ name: name, owner: false }); }
+    }));
+    if (!people.length) return "";
+    return '<span class="rm-group-people">' + people.slice(0, 4).map((person) => '<span class="rm-group-person' + (person.owner ? ' owner' : '') + '" style="background:' + colorHash(person.name) + '" title="' + escapeAttr(personCardText(person.name)) + '">' + initialsFromName(person.name) + '</span>').join("") + (people.length > 4 ? '<span class="rm-group-person-more" title="' + escapeAttr(people.slice(4).map((person) => person.name).join(', ')) + '">+' + (people.length - 4) + '</span>' : '') + '</span>';
+  }
+
   function roadmapPeopleHtml(task) {
     const owner = String(task.Owner || "").trim();
     const contributors = splitMulti(task.Contributors || "").filter((name) => name && name !== owner);
@@ -3376,7 +3394,7 @@
       const bar = '<div class="rm-bar rm-focus-taskbar' + hl + blocked + '" style="left:' + left + '%;width:' + width + '%;--task-status:' + escapeAttr(statusColor(t.Status)) + '" data-task-id="' + t.TaskID + '" title="' + escapeAttr(t.Title + " · " + (t.Status || "")) + '">' +
         '<span class="rm-handle rm-handle-l" data-grip="l"></span>' +
         '<span class="rm-bar-fill" style="width:' + pct + '%"></span>' + caret + scheduleChip(t) +
-        '<span class="rm-focus-title-stack"><span class="rm-bar-label">' + escapeHtml(t.Title || "") + '</span>' + roadmapPeopleHtml(t) + '</span>' +
+        '<span class="rm-focus-title-stack"><span class="rm-bar-label" title="' + escapeAttr(t.Title || "") + '">' + escapeHtml(t.Title || "") + '</span>' + roadmapPeopleHtml(t) + '</span>' +
         '<span class="rm-task-status-dot" title="' + escapeAttr(t.Status || "") + '"></span>' +
         '<span class="rm-handle rm-handle-r" data-grip="r"></span></div>';
       return '<div class="rm-focus-taskwrap"><div class="rm-row rm-focus-timeline-row" data-task-id="' + t.TaskID + '"><div class="rm-row-track">' + bar + '<div class="rm-today" style="left:' + todayPct + '%"></div></div></div>' + (expanded ? '<div class="rm-focus-subtasks">' + focusSubtaskRows(t) + '</div>' : '') + '</div>';
