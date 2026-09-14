@@ -421,6 +421,13 @@
     fillSelect("filter-rgroup", ["", ...allGroups], "All Groups", State.filters.rgroup);
   }
 
+  async function reloadAllData() {
+    // Refresh dimensions as well as tasks. Roadmap groups and workstreams live in
+    // separate tables, so a task-only refresh leaves tabs and CSV scopes stale.
+    await loadConfigAndDimensions();
+    await reloadTasks();
+  }
+
   async function loadAllUpdates() {
     try { State.allUpdates = await window.WsjfData._internal._readTable("UpdatesTable"); }
     catch (e) { State.allUpdates = []; }
@@ -2595,6 +2602,13 @@
     });
   }
 
+  // Multi-value workbook fields are stored as semicolon- or comma-delimited text.
+  // Keep one parser so roadmap rendering, people chips, filters, and exports cannot
+  // fail when a feature calls the helper during refresh.
+  function splitMulti(value) {
+    return String(value == null ? "" : value).split(/[;,]/).map((part) => part.trim()).filter(Boolean);
+  }
+
   const ROADMUNK_MAP_DEFAULTS = { workstreamField: "Workstream", typeField: "Roadmap Type", portfolioValue: "Portfolio", operationalValue: "Operations" };
   const ROADMUNK_BUSINESS_UNITS = ["Tech and Innovation", "Abiomed", "External Innovation", "Innovative Medicine", "Ottava", "JJT", "DPS"];
   const ROADMUNK_FUNCTIONS = ["Innovation", "Biz Enhancement", "Tech Enhancement", "Expansion", "Support", "Milestone"];
@@ -2697,9 +2711,24 @@
   }
   function allRoadmapGroupRecords() {
     const map = new Map();
-    (State.roadmapGroups || []).forEach((g) => map.set(String(g.WorkstreamID || "") + "|" + String(g.Name || "").toLowerCase(), Object.assign({}, g)));
-    State.tasks.forEach((t) => { const name = taskRoadmapGroup(t); if (!name) return; const key = String(t.WorkstreamID || "") + "|" + name.toLowerCase(); if (!map.has(key)) map.set(key, { WorkstreamID: t.WorkstreamID, Name: name, Source: "Product Management Tool" }); });
-    return Array.from(map.values());
+    const validWorkstreams = new Set((State.workstreams || []).map((w) => String(w.WorkstreamID || "").trim()).filter(Boolean));
+    (State.roadmapGroups || []).forEach((g) => {
+      const wid = String(g.WorkstreamID || "").trim(), name = String(g.Name || "").trim();
+      if (!wid || !name || String(g.Archived || "").trim().toLowerCase() === "yes") return;
+      if (validWorkstreams.size && !validWorkstreams.has(wid)) return;
+      map.set(wid + "|" + name.toLowerCase(), Object.assign({}, g, { WorkstreamID: wid, Name: name }));
+    });
+    State.tasks.forEach((t) => {
+      const wid = String(t.WorkstreamID || "").trim(), name = taskRoadmapGroup(t);
+      if (!wid || !name || (validWorkstreams.size && !validWorkstreams.has(wid))) return;
+      const key = wid + "|" + name.toLowerCase();
+      if (!map.has(key)) map.set(key, { WorkstreamID: wid, Name: name, Source: "Product Management Tool" });
+    });
+    const wsOrder = new Map((State.workstreams || []).map((w, i) => [String(w.WorkstreamID || ""), i]));
+    return Array.from(map.values()).sort((a, b) =>
+      (wsOrder.get(String(a.WorkstreamID)) ?? 9999) - (wsOrder.get(String(b.WorkstreamID)) ?? 9999) ||
+      String(a.Name || "").localeCompare(String(b.Name || ""))
+    );
   }
   function exportRoadmapGroups(records, fileName) {
     const source = records || allRoadmapGroupRecords();
@@ -4201,9 +4230,9 @@
 
     document.getElementById("refresh-btn").addEventListener("click", async () => {
       try {
-        await reloadTasks();
+        await reloadAllData();
         render();
-        toast("Refreshed.", "info");
+        toast("Refreshed tasks, subtasks, workstreams, and roadmap groups.", "info");
       } catch (e) {
         toast("Refresh failed: " + e.message, "error");
       }
