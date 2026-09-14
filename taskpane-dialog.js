@@ -17,7 +17,7 @@
   });
 
   function openFullScreen() {
-    const url = new URL("board.html?host=dialog&v=20260911roadmaprefreshfix", window.location.href).href;
+    const url = new URL("board.html?host=dialog&v=20260914roadmunkroundtrip", window.location.href).href;
     showStatus("Opening…", "amber");
     Office.context.ui.displayDialogAsync(
       url,

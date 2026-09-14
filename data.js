@@ -791,7 +791,7 @@
     if (!row && obj.RoadmunkID) row = rows.find((r) => String(r.RoadmunkID || "") === String(obj.RoadmunkID));
     if (!row && obj.ExternalID) row = rows.find((r) => String(r.ExternalID || "") === String(obj.ExternalID));
     if (!row) row = rows.find((r) => String(r.WorkstreamID || "") === String(obj.WorkstreamID || "") && String(r.Name || "").trim().toLowerCase() === String(obj.Name || "").trim().toLowerCase());
-    const fields = ["WorkstreamID","Name","Description","StartDate","EndDate","Progress","BusinessValue","Function","BusinessUnit","Category","XR","Bucket","Source","RoadmunkID","ExternalID","SortOrder","Archived"];
+    const fields = ["WorkstreamID","Name","Description","StartDate","EndDate","Progress","BusinessValue","Function","BusinessUnit","Category","XR","Bucket","Source","RoadmunkID","ExternalID","ProgressMode","SortOrder","Archived"];
     const payload = { LastUpdated: ts, UpdatedBy: me.name };
     fields.forEach((h) => { if (Object.prototype.hasOwnProperty.call(obj, h)) payload[h] = obj[h]; });
     if (row) { await _updateRowMulti(RG_TABLE, row._rowIndex, payload); return String(row.GroupID); }
@@ -816,7 +816,7 @@
       const read = (row, name) => { const i = col(name); return i < 0 ? "" : row[i]; };
       let maxId = 0;
       rows.forEach((row) => { const m = String(read(row, "GroupID") || "").match(/^RG(\d+)$/i); if (m) maxId = Math.max(maxId, Number(m[1]) || 0); });
-      const fields = ["WorkstreamID","Name","Description","StartDate","EndDate","Progress","BusinessValue","Function","BusinessUnit","Category","XR","Bucket","Source","RoadmunkID","ExternalID","SortOrder","Archived"];
+      const fields = ["WorkstreamID","Name","Description","StartDate","EndDate","Progress","BusinessValue","Function","BusinessUnit","Category","XR","Bucket","Source","RoadmunkID","ExternalID","ProgressMode","SortOrder","Archived"];
       const findIndex = (item) => {
         if (item.GroupID) { const i = rows.findIndex((r) => String(read(r,"GroupID")) === String(item.GroupID)); if (i >= 0) return i; }
         if (item.RoadmunkID) { const i = rows.findIndex((r) => String(read(r,"RoadmunkID")) === String(item.RoadmunkID)); if (i >= 0) return i; }

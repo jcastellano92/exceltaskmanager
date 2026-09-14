@@ -242,7 +242,7 @@
         optional: ["StartDate", "Contributors", "GoalID", "Tags", "Health", "Slips"] },
       { name: "WorkstreamsTable", sample: State.workstreams[0],
         critical: ["WorkstreamID", "Name"], optional: ["Owner", "Status", "Goals", "Quarters", "Metric1", "Group"] },
-      { name: "RoadmapGroupsTable", sample: State.roadmapGroups[0], critical: ["GroupID", "Name"], optional: ["WorkstreamID", "Description", "StartDate", "EndDate", "Progress", "BusinessValue", "Function", "BusinessUnit", "Category", "XR", "Bucket", "Source", "RoadmunkID", "ExternalID", "SortOrder", "Archived", "LastUpdated", "UpdatedBy"] },
+      { name: "RoadmapGroupsTable", sample: State.roadmapGroups[0], critical: ["GroupID", "Name"], optional: ["WorkstreamID", "Description", "StartDate", "EndDate", "Progress", "BusinessValue", "Function", "BusinessUnit", "Category", "XR", "Bucket", "Source", "RoadmunkID", "ExternalID", "ProgressMode", "SortOrder", "Archived", "LastUpdated", "UpdatedBy"] },
       { name: "GoalsTable", sample: State.goals[0], critical: ["GoalID"], optional: ["ShortName", "GoalName"] },
       { name: "KeyResultsTable", sample: State.keyResults[0],
         critical: ["KeyResultID", "GoalID", "KeyResultName", "ManualPercent", "CalculationMode", "Weight", "Archived"],
@@ -413,6 +413,7 @@
   async function reloadTasks() {
     State.tasks = await window.WsjfData.readAllTasks();
     await loadAllSubtasks();
+    await syncRoadmapGroupDerivedFields();
     await loadAllUpdates();
     State.lastSyncTs = Date.now();
     updateSyncLabel();
@@ -2643,7 +2644,7 @@
   }
   function roadmapGroupCsvHeaders() {
     const map = roadmunkMap();
-    return ["Internal ID","External ID","Item (REQUIRED)","Description","Start Date","End Date","Quarter","Status","Progress","Business Value","Business Unit","Function",map.workstreamField,map.typeField];
+    return ["Internal ID","ExternalPMID","Item (REQUIRED)","Description","Start Date","End Date","Quarter","Status","Progress","Business Value","Business Unit","Function",map.workstreamField,map.typeField];
   }
   function roadmapGroupRecord(wid, name) {
     return (State.roadmapGroups || []).find((r) => String(r.WorkstreamID || "") === String(wid || "") && String(r.Name || "").trim().toLowerCase() === String(name || "").trim().toLowerCase()) || null;
@@ -2673,41 +2674,22 @@
   }
   function groupCalculatedProgress(g) {
     const tasks = tasksInGroup(g.WorkstreamID, g.Name);
-    if (!tasks.length) return g.Progress || "";
-    const weighted = tasks.filter((task) => Number(task.JobSize) > 0);
-    const value = weighted.length
-      ? weighted.reduce((sum, task) => sum + Number(task.JobSize) * Math.max(0, Math.min(100, Number(task.PercentComplete) || 0)), 0) / weighted.reduce((sum, task) => sum + Number(task.JobSize), 0)
-      : tasks.reduce((sum, task) => sum + Math.max(0, Math.min(100, Number(task.PercentComplete) || 0)), 0) / tasks.length;
-    return Math.round(value);
+    if (groupProgressMode(g) === "Manual") return Math.max(0, Math.min(100, Number(g.Progress) || 0));
+    return tasks.length ? groupAutoProgress(tasks) : Math.max(0, Math.min(100, Number(g.Progress) || 0));
   }
   function groupExportStatus(g, progress) {
     const tasks = tasksInGroup(g.WorkstreamID, g.Name);
     if (tasks.length && tasks.every((task) => isCompleteStatus(task.Status))) return "Complete";
     if (Number(progress) >= 100) return "Complete";
-    const start = isoDate(g.StartDate), end = isoDate(g.EndDate), today = new Date().toISOString().slice(0, 10);
-    if (start && start > today) return "Planned";
-    if ((start && start <= today) || (end && end <= isoDate((State.quarterDates[currentQuarter()] || {}).end))) return "In Progress";
-    return "Planned";
+    const range = effectiveGroupRange(g), today = new Date().toISOString().slice(0, 10);
+    return range.s && range.s > today ? "Planned" : "In Progress";
   }
   function groupCsvRow(g) {
     const w = State.workstreams.find((item) => String(item.WorkstreamID || "") === String(g.WorkstreamID || ""));
-    const progress = groupCalculatedProgress(g);
-    return [
-      g.RoadmunkID || "",
-      g.ExternalID || g.GroupID || "",
-      g.Name,
-      g.Description || "",
-      isoDate(g.StartDate),
-      isoDate(g.EndDate),
-      groupQuarterLabel(g.StartDate, g.EndDate),
-      groupExportStatus(g, progress),
-      progress,
-      g.BusinessValue || "",
-      g.BusinessUnit || "",
-      g.Function || "",
-      (w && (w.Name || w.WorkstreamID)) || g.WorkstreamID || "",
-      roadmunkTypeForWorkstream(g.WorkstreamID)
-    ];
+    const range = effectiveGroupRange(g), progress = groupCalculatedProgress(g);
+    return [g.RoadmunkID || "", g.GroupID || g.ExternalID || "", g.Name, g.Description || "", range.s, range.e,
+      groupQuarterLabel(range.s, range.e), groupExportStatus(g, progress), progress, g.BusinessValue || "", g.BusinessUnit || "", g.Function || "",
+      (w && (w.Name || w.WorkstreamID)) || g.WorkstreamID || "", roadmunkTypeForWorkstream(g.WorkstreamID)];
   }
   function allRoadmapGroupRecords() {
     const map = new Map();
@@ -2746,12 +2728,45 @@
     });
   }
   function taskEffectiveRange(task) {
-    let s = isoDate(task && task.StartDate), e = isoDate(task && task.DueDate);
-    const q = State.quarterDates[task && task.Quarter];
-    if (!s) s = q ? isoDate(q.start) : e;
-    if (!e) e = q ? isoDate(q.end) : s;
-    if (s && e && e < s) e = s;
-    return { s: s || "", e: e || "" };
+    const explicitStart = isoDate(task && task.StartDate), explicitEnd = isoDate(task && task.DueDate);
+    const q = State.quarterDates[task && task.Quarter] || {};
+    const quarterStart = isoDate(q.start), quarterEnd = isoDate(q.end);
+    // Quarter is the planning container. Explicit dates may widen an item, but a
+    // Q1 item cannot silently begin in Q2 because an explicit date was set later.
+    let start = [explicitStart, quarterStart].filter(Boolean).sort()[0] || explicitEnd || quarterEnd || "";
+    let end = [explicitEnd, quarterEnd].filter(Boolean).sort().slice(-1)[0] || start;
+    if (start && end && end < start) end = start;
+    return { s: start || "", e: end || "" };
+  }
+  function groupProgressMode(group) {
+    return String(group && group.ProgressMode || "Auto").trim().toLowerCase() === "manual" ? "Manual" : "Auto";
+  }
+  function groupTaskBounds(wid, name) {
+    const ranges = tasksInGroup(wid, name).map(taskEffectiveRange).filter((r) => r.s && r.e);
+    return ranges.length ? { s: ranges.map((r) => r.s).sort()[0], e: ranges.map((r) => r.e).sort().slice(-1)[0] } : { s: "", e: "" };
+  }
+  function effectiveGroupRange(group) {
+    group = group || {};
+    const content = groupTaskBounds(group.WorkstreamID, group.Name);
+    return { s: [isoDate(group.StartDate), content.s].filter(Boolean).sort()[0] || "", e: [isoDate(group.EndDate), content.e].filter(Boolean).sort().slice(-1)[0] || "", contentS: content.s, contentE: content.e };
+  }
+  async function syncRoadmapGroupDerivedFields() {
+    if (!State.roadmapGroups || !State.roadmapGroups.length) return;
+    let changed = false;
+    for (const group of State.roadmapGroups) {
+      const members = tasksInGroup(group.WorkstreamID, group.Name);
+      if (!members.length) continue;
+      const range = effectiveGroupRange(group), auto = groupAutoProgress(members);
+      const updates = { GroupID: group.GroupID, WorkstreamID: group.WorkstreamID, Name: group.Name };
+      let write = false;
+      if (range.s && isoDate(group.StartDate) !== range.s) { updates.StartDate = range.s; write = true; }
+      if (range.e && isoDate(group.EndDate) !== range.e) { updates.EndDate = range.e; write = true; }
+      if (groupProgressMode(group) === "Auto" && Number(group.Progress) !== auto) { updates.Progress = auto; write = true; }
+      if (Object.prototype.hasOwnProperty.call(group, "ProgressMode") && String(group.ProgressMode || "").trim() !== "Auto") { updates.ProgressMode = "Auto"; write = true; }
+      if (!write) continue;
+      await window.WsjfData.upsertRoadmapGroup(updates); Object.assign(group, updates); changed = true;
+    }
+    if (changed) State.roadmapGroups = await window.WsjfData.readRoadmapGroups();
   }
   function taskFitsGroupEnvelope(task, wid, name, proposedStart, proposedEnd) {
     if (!name) return { ok: true };
@@ -2761,19 +2776,58 @@
     const current = taskEffectiveRange(task), s = isoDate(proposedStart) || current.s, e = isoDate(proposedEnd) || current.e;
     return s && e && (s < gs || e > ge) ? { ok: false, start: gs, end: ge } : { ok: true };
   }
+  function showRoadmunkImportPreview(plan) {
+    return new Promise((resolve) => {
+      const host = document.createElement("div"); host.className = "confirm-overlay rm-import-preview-overlay";
+      const box = document.createElement("div"); box.className = "confirm-box rm-import-preview";
+      const blocked = plan.duplicates.length || plan.invalid.length;
+      const rows = plan.updates.slice(0, 60).map((x) => '<tr><td>' + escapeHtml(x.pmid) + '</td><td>' + escapeHtml(x.name) + '</td><td>' + escapeHtml(x.oldId || 'Blank') + '</td><td>' + escapeHtml(x.newId) + '</td></tr>').join("");
+      const warnings = plan.warnings.slice(0, 40).map((x) => '<li>' + escapeHtml(x) + '</li>').join("");
+      box.innerHTML = '<h3>Review Roadmunk ID import</h3><p>Matching is exact by <strong>ExternalPMID</strong>. Only the Roadmunk ID is updated; Excel-managed dates, progress, descriptions, classifications, and workstreams are preserved.</p>' +
+        '<div class="rm-import-stats"><span><b>' + plan.rows + '</b> rows</span><span><b>' + plan.matched + '</b> matched</span><span><b>' + plan.updates.length + '</b> ID updates</span><span><b>' + plan.unchanged + '</b> unchanged</span><span class="' + (plan.unmatched.length ? 'warn' : '') + '"><b>' + plan.unmatched.length + '</b> unmatched</span></div>' +
+        (rows ? '<div class="rm-import-table-wrap"><table><thead><tr><th>ExternalPMID</th><th>Group</th><th>Current ID</th><th>Imported ID</th></tr></thead><tbody>' + rows + '</tbody></table></div>' : '<p class="muted">No Roadmunk IDs need updating.</p>') +
+        (warnings ? '<details open><summary>Warnings and skipped rows</summary><ul>' + warnings + '</ul></details>' : '') +
+        (blocked ? '<p class="rm-import-blocked">Import is blocked until duplicate or invalid identifiers are corrected.</p>' : '') +
+        '<div class="confirm-actions"><button class="btn btn-secondary" data-import-cancel>Cancel</button><button class="btn btn-primary" data-import-apply' + (blocked || !plan.updates.length ? ' disabled' : '') + '>Import ' + plan.updates.length + ' ID' + (plan.updates.length === 1 ? '' : 's') + '</button></div>';
+      host.appendChild(box); document.body.appendChild(host);
+      const close = (value) => { host.remove(); resolve(value); };
+      box.querySelector('[data-import-cancel]').addEventListener('click', () => close(false));
+      box.querySelector('[data-import-apply]').addEventListener('click', () => close(true));
+      host.addEventListener('click', (event) => { if (event.target === host) close(false); });
+    });
+  }
+  function buildRoadmunkImportPlan(rows) {
+    const byPmid = new Map(), duplicates = [], invalid = [], unmatched = [], warnings = [], updates = [];
+    (State.roadmapGroups || []).forEach((group) => [group.GroupID, group.ExternalID].map((v) => String(v || "").trim()).filter(Boolean).forEach((id) => {
+      const key = id.toLowerCase(); if (byPmid.has(key) && byPmid.get(key) !== group) duplicates.push(id); else byPmid.set(key, group);
+    }));
+    let matched = 0, unchanged = 0; const seen = new Set();
+    rows.forEach((row, index) => {
+      const pmid = String(row.ExternalPMID || row["External PMID"] || row["External ID"] || "").trim();
+      const internalId = String(row["Internal ID"] || row.RoadmunkID || "").trim();
+      const name = String(row["Item (REQUIRED)"] || row.Item || "").trim();
+      if (!pmid || !internalId) { invalid.push(index + 2); warnings.push('Row ' + (index + 2) + ': missing ExternalPMID or Internal ID.'); return; }
+      const key = pmid.toLowerCase(); if (seen.has(key)) { duplicates.push(pmid); warnings.push('Duplicate ExternalPMID in import: ' + pmid + '.'); return; } seen.add(key);
+      const group = byPmid.get(key); if (!group) { unmatched.push(pmid); warnings.push('No Excel group matched ' + pmid + (name ? ' (' + name + ')' : '') + '.'); return; }
+      matched++;
+      if (name && String(group.Name || "").trim().toLowerCase() !== name.toLowerCase()) warnings.push(pmid + ': Roadmunk title differs from Excel. Matched by ExternalPMID only.');
+      if (String(group.RoadmunkID || "").trim() === internalId) { unchanged++; return; }
+      updates.push({ pmid: pmid, name: group.Name, oldId: String(group.RoadmunkID || ""), newId: internalId, item: { GroupID: group.GroupID, WorkstreamID: group.WorkstreamID, Name: group.Name, RoadmunkID: internalId, ExternalID: group.ExternalID || group.GroupID } });
+    });
+    return { rows: rows.length, matched: matched, unchanged: unchanged, duplicates: Array.from(new Set(duplicates)), invalid: invalid, unmatched: unmatched, warnings: warnings, updates: updates };
+  }
   function importRoadmapGroupsFile(file) {
     if (!file) return;
     const reader = new FileReader(); reader.onload = async () => {
       try {
-        const items = parseCsv(String(reader.result || "")).map((r) => {
-          const map = roadmunkMap();
-          const bu = r["Business Unit"] || "";
-          const laneValue = r[map.workstreamField] || r["Workstream ID"] || bu;
-          const ws = workstreamForRoadmunkValue(laneValue, r[map.typeField]);
-          return { RoadmunkID:r["Internal ID"]||"", ExternalID:r["External ID"]||"", Source:r.Source||"Roadmunk", Name:r["Item (REQUIRED)"]||r.Item||"", Description:r.Description||"", StartDate:r["Start Date"]||"", EndDate:r["End Date"]||"", Progress:r.Progress||"", BusinessValue:r["Business Value"]||"", Function:r.Function||"", BusinessUnit:bu, WorkstreamID:(ws&&ws.WorkstreamID)||"" };
-        }).filter((g) => g.Name);
-        await window.WsjfData.importRoadmapGroups(items); State.roadmapGroups = await window.WsjfData.readRoadmapGroups(); renderRoadmap(); toast("Imported " + items.length + " group item(s).", "info");
-      } catch (e) { toast("Import failed: " + e.message, "error"); }
+        const rows = parseCsv(String(reader.result || "")); if (!rows.length) throw new Error("The CSV contains no data rows.");
+        const headers = Object.keys(rows[0] || {});
+        if (!headers.includes("Internal ID")) throw new Error('Column "Internal ID" was not found.');
+        if (!headers.includes("ExternalPMID") && !headers.includes("External PMID") && !headers.includes("External ID")) throw new Error('Column "ExternalPMID" was not found.');
+        const plan = buildRoadmunkImportPlan(rows); if (!(await showRoadmunkImportPreview(plan))) return;
+        await window.WsjfData.importRoadmapGroups(plan.updates.map((x) => x.item)); State.roadmapGroups = await window.WsjfData.readRoadmapGroups();
+        renderRoadmap(); toast("Imported " + plan.updates.length + " Roadmunk ID(s).", "info");
+      } catch (error) { toast("Import failed: " + error.message, "error"); }
     }; reader.readAsText(file);
   }
 
@@ -2795,15 +2849,8 @@
     const isoFromPct = (p) => new Date(t0 + (Math.max(0, Math.min(100, p)) / 100) * span).toISOString().slice(0, 10);
     const todayPct = pctOf(new Date().toISOString().slice(0, 10));
 
-    // A task's bar range — explicit dates, else the quarter's bounds.
-    function rng(task) {
-      let s = isoDate(task.StartDate), e = isoDate(task.DueDate);
-      const q = State.quarterDates[task.Quarter];
-      if (!s) s = q ? isoDate(q.start) : (e || yearStart);
-      if (!e) e = q ? isoDate(q.end) : (s || yearEnd);
-      if (e < s) e = s;
-      return { s: s, e: e };
-    }
+    // Use the same quarter-aware date rule in every roadmap surface.
+    function rng(task) { const range = taskEffectiveRange(task); return { s: range.s || yearStart, e: range.e || range.s || yearEnd }; }
 
     // Which workstream group does a workstream belong to?
     const wsGroupOf = (wid) => {
@@ -3156,11 +3203,8 @@
     toast("Grouping " + tasks.length + "…", "info");
     try {
       await window.WsjfData.setTaskRoadmapGroup(tasks.map((t) => t.TaskID), name);
-      const ranges = tasks.map((t) => {
-        let s = isoDate(t.StartDate), e = isoDate(t.DueDate), q = State.quarterDates[t.Quarter];
-        if (!s) s = q ? isoDate(q.start) : e; if (!e) e = q ? isoDate(q.end) : s; return { s: s, e: e };
-      }).filter((r) => r.s && r.e);
-      await window.WsjfData.upsertRoadmapGroup({ WorkstreamID: wid, Name: name, StartDate: ranges.map((range) => range.s).sort()[0] || "", EndDate: ranges.map((range) => range.e).sort().slice(-1)[0] || "", Progress: "", SortOrder: 9999, Source: "Product Management Tool", Archived: "No" });
+      const ranges = tasks.map(taskEffectiveRange).filter((r) => r.s && r.e);
+      await window.WsjfData.upsertRoadmapGroup({ WorkstreamID: wid, Name: name, StartDate: ranges.map((range) => range.s).sort()[0] || "", EndDate: ranges.map((range) => range.e).sort().slice(-1)[0] || "", Progress: groupAutoProgress(tasks), ProgressMode: "Auto", SortOrder: 9999, Source: "Product Management Tool", Archived: "No" });
       State.roadmapGroups = await window.WsjfData.readRoadmapGroups();
       State.roadmap.selected.clear();
       await reloadTasks();
@@ -3355,7 +3399,7 @@
       if (name && !seen.has(name.toLowerCase())) { seen.add(name.toLowerCase()); people.push({ name: name, owner: false }); }
     }));
     if (!people.length) return "";
-    return '<span class="rm-group-people">' + people.slice(0, 4).map((person) => '<span class="rm-group-person' + (person.owner ? ' owner' : '') + '" style="background:' + colorHash(person.name) + '" title="' + escapeAttr(personCardText(person.name)) + '">' + initialsFromName(person.name) + '</span>').join("") + (people.length > 4 ? '<span class="rm-group-person-more" title="' + escapeAttr(people.slice(4).map((person) => person.name).join(', ')) + '">+' + (people.length - 4) + '</span>' : '') + '</span>';
+    return '<span class="rm-group-people">' + people.slice(0, 4).map((person) => '<span class="rm-group-person' + (person.owner ? ' owner' : '') + '" style="background:' + colorHash(person.name) + '" title="' + escapeAttr(personCardText(person.name)) + '" data-person-name="' + escapeAttr(person.name) + '">' + initialsFromName(person.name) + '</span>').join("") + (people.length > 4 ? '<span class="rm-group-person-more" title="' + escapeAttr(people.slice(4).map((person) => person.name).join(', ')) + '">+' + (people.length - 4) + '</span>' : '') + '</span>';
   }
 
   function roadmapPeopleHtml(task) {
@@ -3363,16 +3407,31 @@
     const contributors = splitMulti(task.Contributors || "").filter((name) => name && name !== owner);
     const people = (owner ? [{ name: owner, owner: true }] : []).concat(contributors.map((name) => ({ name: name, owner: false })));
     if (!people.length) return "";
-    return '<div class="rm-task-people">' + people.slice(0, 5).map((person) => '<span class="rm-person-avatar' + (person.owner ? ' owner' : '') + '" style="background:' + colorHash(person.name) + '" title="' + escapeAttr((person.owner ? 'Owner: ' : 'Contributor: ') + person.name) + '">' + initialsFromName(person.name) + '</span>').join("") + (people.length > 5 ? '<span class="rm-person-more">+' + (people.length - 5) + '</span>' : '') + '</div>';
+    return '<div class="rm-task-people">' + people.slice(0, 5).map((person) => '<span class="rm-person-avatar' + (person.owner ? ' owner' : '') + '" style="background:' + colorHash(person.name) + '" title="' + escapeAttr(personCardText(person.name)) + '" data-person-name="' + escapeAttr(person.name) + '">' + initialsFromName(person.name) + '</span>').join("") + (people.length > 5 ? '<span class="rm-person-more">+' + (people.length - 5) + '</span>' : '') + '</div>';
+  }
+
+  function personProfileHtml(name) {
+    const person = personByName(name); if (!person) return '<div class="person-pop-name">' + escapeHtml(name) + '</div>';
+    const roles = assignmentsForPerson(person.PersonID).map((a) => '<span>' + escapeHtml(workstreamName(a.WorkstreamID) || a.WorkstreamID) + (a.Role ? ' · ' + escapeHtml(a.Role) : '') + '</span>').join('');
+    return '<div class="person-pop-head"><span class="person-pop-avatar" style="background:' + colorHash(person.DisplayName) + '">' + initialsFromName(person.DisplayName) + '</span><div><strong>' + escapeHtml(person.DisplayName) + '</strong>' + (person.Title ? '<small>' + escapeHtml(person.Title) + '</small>' : '') + '</div></div>' + ([person.Email, person.TeamType, person.Category, person.Function].filter(Boolean).length ? '<div class="person-pop-meta">' + [person.Email, person.TeamType, person.Category, person.Function].filter(Boolean).map(escapeHtml).join(' · ') + '</div>' : '') + (roles ? '<div class="person-pop-roles">' + roles + '</div>' : '');
+  }
+  function wirePersonProfileCards(root) {
+    let card = document.getElementById("person-profile-card"); if (!card) { card = document.createElement("div"); card.id = "person-profile-card"; card.className = "person-profile-card"; card.hidden = true; document.body.appendChild(card); }
+    Array.from((root || document).querySelectorAll('[data-person-name]')).forEach((el) => {
+      el.addEventListener('mouseenter', () => { card.innerHTML = personProfileHtml(el.dataset.personName || ""); const rect = el.getBoundingClientRect(); card.hidden = false; card.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 308)) + 'px'; card.style.top = Math.min(rect.bottom + 8, window.innerHeight - card.offsetHeight - 8) + 'px'; });
+      el.addEventListener('mouseleave', () => { card.hidden = true; });
+    });
   }
 
   function renderGroupFocus() {
     const f = State.roadmap.focus;
     if (!f) return;
     const members = tasksInGroup(f.wid, f.name);
-    const groupMeta = roadmapGroupRecord(f.wid, f.name) || { WorkstreamID: f.wid, Name: f.name };
-    const autoProgress = groupAutoProgress(members), hasManualProgress = String(groupMeta.Progress || "").trim() !== "";
-    const shownProgress = hasManualProgress ? Math.max(0, Math.min(100, Number(groupMeta.Progress) || 0)) : autoProgress;
+    const storedGroupMeta = roadmapGroupRecord(f.wid, f.name) || { WorkstreamID: f.wid, Name: f.name };
+    const effectiveRange = effectiveGroupRange(storedGroupMeta);
+    const groupMeta = Object.assign({}, storedGroupMeta, { StartDate: effectiveRange.s, EndDate: effectiveRange.e });
+    const autoProgress = groupAutoProgress(members), hasManualProgress = groupProgressMode(storedGroupMeta) === "Manual";
+    const shownProgress = hasManualProgress ? Math.max(0, Math.min(100, Number(storedGroupMeta.Progress) || 0)) : autoProgress;
     let host = document.getElementById("rm-focus");
     if (!host) {
       host = document.createElement("div");
@@ -3393,14 +3452,7 @@
     const pctOf = (iso) => { const tt = new Date(iso + "T00:00:00").getTime(); return isNaN(tt) ? 0 : Math.max(0, Math.min(100, ((tt - t0) / span) * 100)); };
     const isoFromPct = (p) => new Date(t0 + (Math.max(0, Math.min(100, p)) / 100) * span).toISOString().slice(0, 10);
     const todayPct = pctOf(new Date().toISOString().slice(0, 10));
-    const rng = (task) => {
-      let s = isoDate(task.StartDate), e = isoDate(task.DueDate);
-      const q = State.quarterDates[task.Quarter];
-      if (!s) s = q ? isoDate(q.start) : (e || yearStart);
-      if (!e) e = q ? isoDate(q.end) : (s || yearEnd);
-      if (e < s) e = s;
-      return { s: s, e: e };
-    };
+    const rng = (task) => { const range = taskEffectiveRange(task); return { s: range.s || yearStart, e: range.e || range.s || yearEnd }; };
     const usedStatuses = boardColumns();
     const statusCounts = {}; members.forEach((t) => { const key = String(t.Status || "Unspecified"); statusCounts[key] = (statusCounts[key] || 0) + 1; });
     const legend = usedStatuses.map((s) => '<span class="rm-leg"><i style="background:' + statusColor(s) + '"></i>' + escapeHtml(s) + (statusCounts[s] ? ' <b>' + statusCounts[s] + '</b>' : '') + '</span>').join("");
@@ -3422,8 +3474,8 @@
       const caret = subs.length ? '<button class="rm-focus-caret" data-rf-exp="' + t.TaskID + '" type="button" title="' + (expanded ? 'Hide subtasks' : 'Show subtasks') + '">' + (expanded ? '−' : '+') + '</button>' : '';
       const bar = '<div class="rm-bar rm-focus-taskbar' + hl + blocked + '" style="left:' + left + '%;width:' + width + '%;--task-status:' + escapeAttr(statusColor(t.Status)) + '" data-task-id="' + t.TaskID + '" title="' + escapeAttr(t.Title + " · " + (t.Status || "")) + '">' +
         '<span class="rm-handle rm-handle-l" data-grip="l"></span>' +
-        '<span class="rm-bar-fill" style="width:' + pct + '%"></span>' + caret + scheduleChip(t) +
-        '<span class="rm-focus-title-stack"><span class="rm-bar-label" title="' + escapeAttr(t.Title || "") + '">' + escapeHtml(t.Title || "") + '</span>' + roadmapPeopleHtml(t) + '</span>' +
+        '<span class="rm-bar-fill" style="width:' + pct + '%"></span>' + caret + scheduleChip(t) + roadmapPeopleHtml(t) +
+        '<span class="rm-bar-label" title="' + escapeAttr(t.Title || "") + '">' + escapeHtml(t.Title || "") + '</span>' +
         '<span class="rm-task-status-dot" title="' + escapeAttr(t.Status || "") + '"></span>' +
         '<span class="rm-handle rm-handle-r" data-grip="r"></span></div>';
       return '<div class="rm-focus-taskwrap"><div class="rm-row rm-focus-timeline-row" data-task-id="' + t.TaskID + '"><div class="rm-row-track">' + bar + '<div class="rm-today" style="left:' + todayPct + '%"></div></div></div>' + (expanded ? '<div class="rm-focus-subtasks">' + focusSubtaskRows(t) + '</div>' : '') + '</div>';
@@ -3450,7 +3502,7 @@
           '<div class="rm-row rm-axis-row rm-focus-timeline-row"><div class="rm-row-track rm-axis-track">' +
             ["Q1", "Q2", "Q3", "Q4"].map((q) => '<span class="rm-qcol' + (q === currentQuarter() ? " current" : "") + '">' + q + '</span>').join("") +
             '<div class="rm-today" style="left:' + todayPct + '%"></div></div></div>' +
-          ((isoDate(groupMeta.StartDate) && isoDate(groupMeta.EndDate)) ? '<div class="rm-row rm-focus-window-row"><div class="rm-row-label">Group window</div><div class="rm-row-track"><div class="rm-focus-window" style="left:' + pctOf(isoDate(groupMeta.StartDate)) + '%;width:' + Math.max(1.5, pctOf(isoDate(groupMeta.EndDate)) - pctOf(isoDate(groupMeta.StartDate))) + '%"><span>' + escapeHtml(formatDateShort(groupMeta.StartDate) + ' – ' + formatDateShort(groupMeta.EndDate)) + '</span></div><div class="rm-today" style="left:' + todayPct + '%"></div></div></div>' : '') +
+          ((isoDate(groupMeta.StartDate) && isoDate(groupMeta.EndDate)) ? '<div class="rm-row rm-focus-window-row"><div class="rm-row-track"><span class="rm-focus-window-caption">Group window</span><div class="rm-focus-window" data-rf-window style="left:' + pctOf(groupMeta.StartDate) + '%;width:' + Math.max(1.5, pctOf(groupMeta.EndDate) - pctOf(groupMeta.StartDate)) + '%" data-min="' + escapeAttr(effectiveRange.contentS) + '" data-max="' + escapeAttr(effectiveRange.contentE) + '"><span class="rm-group-handle rm-group-handle-l" data-rf-window-grip="l"></span><b>' + escapeHtml(formatDateShort(groupMeta.StartDate) + ' – ' + formatDateShort(groupMeta.EndDate)) + '</b><span class="rm-group-handle rm-group-handle-r" data-rf-window-grip="r"></span></div><div class="rm-today" style="left:' + todayPct + '%"></div></div></div>' : '') +
           rowsHtml +
         '</div></div>' +
         '<div class="rm-dragtip" hidden></div>' +
@@ -3460,6 +3512,50 @@
     host.addEventListener("click", (e) => { if (e.target === host) closeGroupFocus(); });
     host.onkeydown = (e) => { if (e.key === "Escape" && !State.modalOpen) { e.preventDefault(); closeGroupFocus(); } };
     host.tabIndex = -1; host.focus({ preventScroll: true });
+    wirePersonProfileCards(host);
+    const focusWindow = host.querySelector('[data-rf-window]');
+    if (focusWindow) {
+      const beginWindowDrag = (event, side) => {
+        if (event.button !== 0) return;
+        event.preventDefault(); event.stopPropagation();
+        const trackWidth = focusWindow.parentElement.getBoundingClientRect().width, startX = event.clientX;
+        const left0 = parseFloat(focusWindow.style.left) || 0, width0 = parseFloat(focusWindow.style.width) || 1;
+        const minPct = pctOf(focusWindow.dataset.min), maxPct = pctOf(focusWindow.dataset.max);
+        let left = left0, width = width0, moved = false;
+        const move = (e) => {
+          const delta = ((e.clientX - startX) / trackWidth) * 100; moved = Math.abs(e.clientX - startX) > 4;
+          if (side === "l") { left = Math.max(0, Math.min(minPct, left0 + delta)); width = left0 + width0 - left; }
+          else if (side === "r") { left = left0; width = Math.max(maxPct - left0, Math.min(100 - left0, width0 + delta)); }
+          else { left = Math.max(0, Math.min(100 - width0, left0 + delta)); width = width0; }
+          focusWindow.style.left = left + "%"; focusWindow.style.width = width + "%";
+          focusWindow.querySelector("b").textContent = formatDateShort(isoFromPct(left)) + " – " + formatDateShort(isoFromPct(left + width));
+        };
+        const up = async () => {
+          document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
+          if (!moved) return;
+          try {
+            const newStart = isoFromPct(left), newEnd = isoFromPct(left + width);
+            if (side === "move") {
+              const deltaMs = new Date(newStart + "T00:00:00").getTime() - new Date(groupMeta.StartDate + "T00:00:00").getTime();
+              await window.WsjfData.upsertRoadmapGroup({ GroupID: storedGroupMeta.GroupID || "", WorkstreamID: f.wid, Name: f.name, StartDate: newStart, EndDate: newEnd });
+              for (const task of members) {
+                const range = taskEffectiveRange(task), shiftedStart = range.s ? shiftIso(range.s, deltaMs) : "", shiftedEnd = range.e ? shiftIso(range.e, deltaMs) : "";
+                const updates = { TaskID: task.TaskID, StartDate: shiftedStart, DueDate: shiftedEnd };
+                const quarter = quarterOf(shiftedStart); if (quarter) updates.Quarter = quarter;
+                await window.WsjfData.writeTask(updates, { force: true, silent: true });
+                for (const sub of (State.subtasksByParent[task.TaskID] || [])) if (sub.SubtaskID && sub.DueDate) await window.WsjfData.writeSubtask({ SubtaskID: sub.SubtaskID, DueDate: shiftIso(sub.DueDate, deltaMs) });
+              }
+            } else {
+              await window.WsjfData.upsertRoadmapGroup({ GroupID: storedGroupMeta.GroupID || "", WorkstreamID: f.wid, Name: f.name, StartDate: newStart, EndDate: newEnd });
+            }
+            await reloadAllData(); renderGroupFocus(); toast(side === "move" ? "Group and member dates moved together." : "Group window resized.", "info");
+          } catch (error) { toast("Group window update failed: " + error.message, "error"); await reloadAllData(); renderGroupFocus(); }
+        };
+        document.addEventListener("pointermove", move); document.addEventListener("pointerup", up, { once: true });
+      };
+      focusWindow.addEventListener("pointerdown", (event) => { if (!event.target.closest("[data-rf-window-grip]")) beginWindowDrag(event, "move"); });
+      focusWindow.querySelectorAll("[data-rf-window-grip]").forEach((handle) => handle.addEventListener("pointerdown", (event) => beginWindowDrag(event, handle.dataset.rfWindowGrip)));
+    }
     const fields = host.querySelector("#rf-fields");
     const fieldsToggle = host.querySelector("#rf-fields-toggle");
     fieldsToggle.addEventListener("click", () => { fields.hidden = !fields.hidden; fieldsToggle.setAttribute("aria-expanded", String(!fields.hidden)); fieldsToggle.querySelector("span").textContent = fields.hidden ? "›" : "⌄"; });
@@ -3479,7 +3575,7 @@
     host.querySelector("#rf-save-fields").addEventListener("click", async () => {
       const btn = host.querySelector("#rf-save-fields"); btn.disabled = true; btn.textContent = "Saving…";
       try {
-        await window.WsjfData.upsertRoadmapGroup({ GroupID:groupMeta.GroupID||"", WorkstreamID:f.wid, Name:host.querySelector("#rf-title").value.trim(), Description:host.querySelector("#rf-description").value, StartDate:host.querySelector("#rf-start").value, EndDate:host.querySelector("#rf-end").value, Progress:host.querySelector("#rf-progress-auto").checked ? "" : host.querySelector("#rf-progress").value, BusinessValue:host.querySelector("#rf-business-value").value, Function:host.querySelector("#rf-function").value, BusinessUnit:host.querySelector("#rf-business-unit").value, Source:host.querySelector("#rf-source").value, RoadmunkID:host.querySelector("#rf-roadmunk-id").value, ExternalID:host.querySelector("#rf-external-id").value });
+        await window.WsjfData.upsertRoadmapGroup({ GroupID:storedGroupMeta.GroupID||"", WorkstreamID:f.wid, Name:host.querySelector("#rf-title").value.trim(), Description:host.querySelector("#rf-description").value, StartDate:host.querySelector("#rf-start").value, EndDate:host.querySelector("#rf-end").value, Progress:host.querySelector("#rf-progress-auto").checked ? autoProgress : host.querySelector("#rf-progress").value, ProgressMode:host.querySelector("#rf-progress-auto").checked ? "Auto" : "Manual", BusinessValue:host.querySelector("#rf-business-value").value, Function:host.querySelector("#rf-function").value, BusinessUnit:host.querySelector("#rf-business-unit").value, Source:host.querySelector("#rf-source").value, RoadmunkID:host.querySelector("#rf-roadmunk-id").value, ExternalID:storedGroupMeta.ExternalID || storedGroupMeta.GroupID || "" });
         State.roadmapGroups = await window.WsjfData.readRoadmapGroups(); toast("Group details saved.", "info"); renderGroupFocus();
       } catch (e) { toast("Group save failed: " + e.message, "error"); btn.disabled = false; btn.textContent = "Save group details"; }
     });
