@@ -11,7 +11,7 @@
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
   <!-- Self-hosted (a CDN reference here gets blocked on locked-down corporate networks, which silently kills drag-and-drop). -->
   <script src="sortable.min.js?v=20260701f"></script>
-  <link rel="stylesheet" href="board.css?v=20260914roadmunkroundtrip" />
+  <link rel="stylesheet" href="board.css?v=20261104outcomes" />
 
 <!--[if gte mso 9]><xml>
 <mso:CustomDocumentProperties>
@@ -233,6 +233,28 @@
               </div>
             </div>
 
+            <div class="outcome-align-block dg-card">
+              <div class="kr-align-head">
+                <div><label class="field-label">Outcomes</label><small>Connect delivery to the result it is expected to influence.</small></div>
+              </div>
+              <label class="field-label" for="m-primary-outcome">Primary Outcome</label>
+              <select id="m-primary-outcome"><option value="">— Select an outcome —</option></select>
+              <label class="field-label">Additional Outcome links</label>
+              <div class="contrib-checks outcome-task-checks" id="m-outcomes"></div>
+            </div>
+            <details class="task-advanced" id="m-delivery-details">
+              <summary>Dependency, date source and acceptance</summary>
+              <div class="dg-two">
+                <label class="field-label">Waiting On<input id="m-waiting-on" type="text" placeholder="Person, team, vendor or decision" /></label>
+                <label class="field-label">Dependency owner<select id="m-dependency-owner"><option value="">— None —</option></select></label>
+                <label class="field-label">Dependency date<input id="m-dependency-date" type="date" /></label>
+                <label class="field-label">Dependency status<select id="m-dependency-status"><option value="">— None —</option><option>Not Started</option><option>Waiting</option><option>At Risk</option><option>Resolved</option></select></label>
+                <label class="field-label">Date Source<select id="m-date-source"><option value="">— Select —</option><option>Committed</option><option>Forecast</option><option>Dependency</option><option>Regulatory</option><option>Vendor</option><option>Manual</option></select></label>
+                <label class="field-label">Internal accountable role<input id="m-accountable-role" type="text" placeholder="Internal role accountable for delivery" /></label>
+              </div>
+              <label class="field-label">Acceptance Criteria</label>
+              <textarea id="m-acceptance-criteria" rows="3" placeholder="What must be true for this work to be accepted?"></textarea>
+            </details>
             <div class="kr-align-block">
               <div class="kr-align-head">
                 <div><label class="field-label">Contributes to key results</label><small>Choose the measurable outcomes this work supports.</small></div>
@@ -319,6 +341,7 @@
           <div id="m-updates-list" class="updates-list"></div>
           <div class="update-add">
             <textarea id="m-update-text" rows="2" placeholder="Add an update…"></textarea>
+            <select id="m-update-class" aria-label="Feedback classification"><option>NO CHANGE</option><option>APPROVED</option><option>Question</option><option>Correction</option><option>Terminology</option></select>
             <button class="btn btn-primary btn-sm" id="m-update-add">Post update</button>
           </div>
         </div>
@@ -342,7 +365,7 @@
 <!-- toasts -->
 <div id="toast-host" class="toast-host"></div>
 
-<script src="data.js?v=20260914roadmunkroundtrip"></script>
-<script src="board.js?v=20260914roadmunkroundtrip"></script>
+<script src="data.js?v=20261104outcomes"></script>
+<script src="board.js?v=20261104outcomes"></script>
 </body>
 </html>

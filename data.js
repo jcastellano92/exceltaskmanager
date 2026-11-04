@@ -28,6 +28,10 @@
   const PERSON_WS_TABLE = "PersonWorkstreamsTable";
   const WS_LINKS_TABLE = "WorkstreamLinksTable";
   const WS_DOCS_TABLE = "WorkstreamDocumentsTable";
+  const OUTCOME_TABLE = "OutcomesTable";
+  const MEASURE_TABLE = "OutcomeMeasuresTable";
+  const RESULT_TABLE = "OutcomeResultsTable";
+  const OUTCOME_LINK_TABLE = "TaskOutcomeLinksTable";
   const CFG_SHEET   = "Config";
 
   // Which statuses mean "complete"? Set by the UI from StatusesTable's Bucket
@@ -49,7 +53,11 @@
     Attachment: { table: ATT_TABLE,   col: "AttachmentID" },
     Log:        { table: LOG_TABLE,   col: "LogID" },
     Update:     { table: UPD_TABLE,   col: "UpdateID" },
-    Milestone:  { table: MS_TABLE,    col: "MilestoneID" }
+    Milestone:  { table: MS_TABLE,    col: "MilestoneID" },
+    Outcome:    { table: OUTCOME_TABLE, col: "OutcomeID" },
+    Measure:    { table: MEASURE_TABLE, col: "MeasureID" },
+    Result:     { table: RESULT_TABLE, col: "ResultID" },
+    OutcomeLink:{ table: OUTCOME_LINK_TABLE, col: "LinkID" }
   };
 
   // ────────────────────────────────────────────────────────────
@@ -310,7 +318,7 @@
       if (Object.prototype.hasOwnProperty.call(taskObj, h)) updates[h] = taskObj[h];
     });
     // Optional columns not in the canonical header list (written only if present).
-    ["StartDate", "CommitmentID", "Health", "Slips", "RoadmapGroup"].forEach((h) => {
+    ["StartDate", "CommitmentID", "Health", "Slips", "RoadmapGroup", "PrimaryOutcomeID", "WaitingOn", "DependencyOwner", "DependencyDate", "DependencyStatus", "DateSource", "AcceptanceCriteria", "InternalAccountableRole"].forEach((h) => {
       if (Object.prototype.hasOwnProperty.call(taskObj, h)) updates[h] = taskObj[h];
     });
     updates.LastUpdated = ts;
@@ -436,7 +444,7 @@
     });
     // Optional columns not in the canonical header list (written only if the
     // column exists; harmlessly ignored otherwise).
-    ["StartDate", "CommitmentID", "Health", "Slips", "RoadmapGroup"].forEach((h) => {
+    ["StartDate", "CommitmentID", "Health", "Slips", "RoadmapGroup", "PrimaryOutcomeID", "WaitingOn", "DependencyOwner", "DependencyDate", "DependencyStatus", "DateSource", "AcceptanceCriteria", "InternalAccountableRole"].forEach((h) => {
       if (Object.prototype.hasOwnProperty.call(taskObj, h)) obj[h] = taskObj[h];
     });
 
@@ -593,7 +601,8 @@
       ParentID: obj.ParentID,
       Text: obj.Text || "",
       AddedBy: me.name,
-      AddedDate: _nowIso()
+      AddedDate: _nowIso(),
+      FeedbackClass: obj.FeedbackClass || "NO CHANGE"
     });
     return id;
   }
@@ -1081,6 +1090,77 @@
     if (idx >= 0) { await _deleteRow(MS_TABLE, idx); await logActivity("Milestone", id, "Deleted", "", "", "", ""); }
   }
 
+
+  // Outcome-focused portfolio data. Every read/write resolves columns by header name.
+  async function _nextPrefixedId(table, header, prefix) {
+    const rows = await _readTable(table);
+    let max = 0;
+    rows.forEach((r) => {
+      const m = String(r[header] || "").match(/(\d+)$/);
+      if (m) max = Math.max(max, Number(m[1]) || 0);
+    });
+    return prefix + (max + 1);
+  }
+
+  async function readOutcomes() {
+    const rows = await _readTable(OUTCOME_TABLE);
+    return rows.filter((r) => String(r.OutcomeID || "").trim() && String(r.Archived || "").toLowerCase() !== "yes");
+  }
+  async function readOutcomeMeasures() {
+    const rows = await _readTable(MEASURE_TABLE);
+    return rows.filter((r) => String(r.MeasureID || "").trim() && String(r.Archived || "").toLowerCase() !== "yes");
+  }
+  async function readOutcomeResults() {
+    const rows = await _readTable(RESULT_TABLE);
+    return rows.filter((r) => String(r.ResultID || "").trim() && String(r.Archived || "").toLowerCase() !== "yes");
+  }
+  async function readTaskOutcomeLinks() {
+    const rows = await _readTable(OUTCOME_LINK_TABLE);
+    return rows.filter((r) => String(r.LinkID || "").trim() && String(r.Archived || "").toLowerCase() !== "yes");
+  }
+  async function _verifiedUpsert(table, idHeader, idValue, fields, entityType) {
+    const me = await getCurrentUser();
+    const idx = await _findRowIndexById(table, idHeader, idValue);
+    const payload = Object.assign({}, fields, { LastUpdated: _nowIso(), UpdatedBy: me.name });
+    if (idx >= 0) await _updateRowMulti(table, idx, payload);
+    else await _appendObjByHeaders(table, Object.assign({}, payload, { [idHeader]: idValue, CreatedDate: _nowIso(), CreatedBy: me.name, Archived: "No" }));
+    const saved = (await _readTable(table)).find((r) => String(r[idHeader]) === String(idValue));
+    if (!saved) throw new Error(entityType + " save could not be verified. Form data was preserved.");
+    await logActivity(entityType, idValue, idx >= 0 ? "Updated" : "Created", "", "", "", "Verified after write");
+    return saved;
+  }
+  async function upsertOutcome(fields) {
+    let id = fields.OutcomeID;
+    if (!id) id = await _nextPrefixedId(OUTCOME_TABLE, "OutcomeID", "O");
+    const prior = fields.OutcomeID ? (await _readTable(OUTCOME_TABLE)).find((r) => String(r.OutcomeID) === String(fields.OutcomeID)) : null;
+    if (prior && String(prior.OriginalTarget || "") && String(fields.OriginalTarget || "") !== String(prior.OriginalTarget || "") && String(fields.TargetCorrectionApproved || "").toLowerCase() !== "yes") {
+      throw new Error("Original Target is locked. Use the correction flow and provide an approved correction reason.");
+    }
+    return _verifiedUpsert(OUTCOME_TABLE, "OutcomeID", id, fields, "Outcome");
+  }
+  async function upsertOutcomeMeasure(fields) {
+    let id = fields.MeasureID;
+    if (!id) id = await _nextPrefixedId(MEASURE_TABLE, "MeasureID", "M");
+    const prior = fields.MeasureID ? (await _readTable(MEASURE_TABLE)).find((r) => String(r.MeasureID) === String(fields.MeasureID)) : null;
+    if (prior && String(prior.OriginalTarget || "") && String(fields.OriginalTarget || "") !== String(prior.OriginalTarget || "") && String(fields.TargetCorrectionApproved || "").toLowerCase() !== "yes") throw new Error("Original Target is locked. Use the correction flow.");
+    return _verifiedUpsert(MEASURE_TABLE, "MeasureID", id, fields, "OutcomeMeasure");
+  }
+  async function upsertOutcomeResult(fields) {
+    let id = fields.ResultID;
+    if (!id) id = await _nextPrefixedId(RESULT_TABLE, "ResultID", "R");
+    return _verifiedUpsert(RESULT_TABLE, "ResultID", id, fields, "OutcomeResult");
+  }
+  async function archiveOutcome(outcomeId) { return upsertOutcome({ OutcomeID: outcomeId, Archived: "Yes" }); }
+  async function syncTaskOutcomeLinks(parentType, parentId, outcomeIds, primaryOutcomeId) {
+    const current = (await _readTable(OUTCOME_LINK_TABLE)).filter((r) => String(r.ParentType) === String(parentType) && String(r.ParentID) === String(parentId));
+    for (const row of current) if (String(row.Archived || "").toLowerCase() !== "yes") await _updateRowMulti(OUTCOME_LINK_TABLE, row._rowIndex, { Archived: "Yes", LastUpdated: _nowIso() });
+    for (const outcomeId of Array.from(new Set(outcomeIds || []))) {
+      const id = await _nextPrefixedId(OUTCOME_LINK_TABLE, "LinkID", "OL");
+      await _verifiedUpsert(OUTCOME_LINK_TABLE, "LinkID", id, { ParentType: parentType, ParentID: parentId, OutcomeID: outcomeId, LinkType: String(outcomeId) === String(primaryOutcomeId) ? "Primary" : "Additional", Archived: "No" }, "OutcomeLink");
+    }
+    return readTaskOutcomeLinks();
+  }
+
   // ────────────────────────────────────────────────────────────
   // Public API
   // ────────────────────────────────────────────────────────────
@@ -1089,6 +1169,7 @@
     getCurrentUser, setCurrentUser,
     // tasks
     readAllTasks, readArchivedTasks, readTaskById, readKeyResults, readTaskKeyResultLinks, readAllAttachments,
+    readOutcomes, readOutcomeMeasures, readOutcomeResults, readTaskOutcomeLinks,
     writeTask, writeTaskStatus, setTaskRoadmapGroup, createTask, archiveTask,
     // children
     readSubtasksForTask, readAttachmentsForTask, readActivityForTask,
@@ -1108,6 +1189,7 @@
     readRoadmapGroups, upsertRoadmapGroup, deleteRoadmapGroup, importRoadmapGroups, saveSubtasksBatch,
     createGoal, updateGoal, deleteGoal,
     createKeyResult, updateKeyResult, archiveKeyResult,
+    upsertOutcome, upsertOutcomeMeasure, upsertOutcomeResult, archiveOutcome, syncTaskOutcomeLinks,
     syncTaskKeyResultLinks, updateTaskKeyResultLink,
     // milestones (standalone roadmap lines)
     readMilestones, createMilestone, updateMilestone, deleteMilestone,

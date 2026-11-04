@@ -57,6 +57,10 @@
     expandedGoals: new Set(),
     expandedKeyResults: new Set(),
     workstreams: [],
+    outcomes: [],
+    outcomeMeasures: [],
+    outcomeResults: [],
+    taskOutcomeLinks: [],
     roadmapGroups: [],
     people: [],
     personWorkstreams: [],
@@ -161,7 +165,9 @@
       "createMilestone", "updateMilestone", "deleteMilestone",
       "readRoadmapGroups", "upsertRoadmapGroup", "deleteRoadmapGroup", "importRoadmapGroups", "saveSubtasksBatch",
       "readPeople", "readPersonWorkstreams", "upsertPerson", "upsertPersonWorkstream", "deletePersonWorkstream",
-      "readWorkstreamLinks", "readWorkstreamDocuments", "upsertWorkstreamLink", "deleteWorkstreamLink", "upsertWorkstreamDocument", "deleteWorkstreamDocument"
+      "readWorkstreamLinks", "readWorkstreamDocuments", "upsertWorkstreamLink", "deleteWorkstreamLink", "upsertWorkstreamDocument", "deleteWorkstreamDocument",
+      "upsertOutcome", "upsertOutcomeMeasure", "upsertOutcomeResult", "archiveOutcome", "syncTaskOutcomeLinks",
+      "readOutcomes", "readOutcomeMeasures", "readOutcomeResults", "readTaskOutcomeLinks", "upsertOutcome", "upsertOutcomeMeasure", "upsertOutcomeResult", "archiveOutcome", "syncTaskOutcomeLinks"
     ];
     const api = {};
     methods.forEach((m) => {
@@ -198,7 +204,8 @@
       "createMilestone", "updateMilestone", "deleteMilestone",
       "upsertRoadmapGroup", "deleteRoadmapGroup", "importRoadmapGroups", "saveSubtasksBatch",
       "upsertPerson", "upsertPersonWorkstream", "deletePersonWorkstream",
-      "upsertWorkstreamLink", "deleteWorkstreamLink", "upsertWorkstreamDocument", "deleteWorkstreamDocument"
+      "upsertWorkstreamLink", "deleteWorkstreamLink", "upsertWorkstreamDocument", "deleteWorkstreamDocument",
+      "upsertOutcome", "upsertOutcomeMeasure", "upsertOutcomeResult", "archiveOutcome", "syncTaskOutcomeLinks"
     ];
     let chain = Promise.resolve();
     mutating.forEach((m) => {
@@ -298,6 +305,12 @@
     State.workstreams = workstreams;
     try { State.people = await window.WsjfData.readPeople(); State.personWorkstreams = await window.WsjfData.readPersonWorkstreams(); }
     catch (e) { State.people = []; State.personWorkstreams = []; console.warn("People directory unavailable:", e.message); }
+    try {
+      State.outcomes = await window.WsjfData.readOutcomes();
+      State.outcomeMeasures = await window.WsjfData.readOutcomeMeasures();
+      State.outcomeResults = await window.WsjfData.readOutcomeResults();
+      State.taskOutcomeLinks = await window.WsjfData.readTaskOutcomeLinks();
+    } catch (e) { State.outcomes = []; State.outcomeMeasures = []; State.outcomeResults = []; State.taskOutcomeLinks = []; console.warn("Outcome tables unavailable:", e.message); }
     try { State.workstreamLinks = await window.WsjfData.readWorkstreamLinks(); State.workstreamDocuments = await window.WsjfData.readWorkstreamDocuments(); }
     catch (e) { State.workstreamLinks = []; State.workstreamDocuments = []; console.warn("Workstream resources unavailable:", e.message); }
     try { State.roadmapGroups = await window.WsjfData.readRoadmapGroups(); }
@@ -2163,7 +2176,7 @@
     return expected != null && expected >= 30 && actual < 40 && actual < expected - 35;
   }
 
-  function renderWorkstreams() {
+  function renderWorkstreamsBase() {
     const root = document.getElementById("wsview");
     root.innerHTML = "";
     if (!State.wsQuarter) State.wsQuarter = currentQuarter();
@@ -2235,6 +2248,95 @@
   }
 
   // Quarter "bird's-eye" dashboard above the workstream cards.
+  function renderWorkstreams() {
+    renderWorkstreamsBase();
+    const root = document.getElementById("wsview");
+    if (root) enhanceWorkstreamsWithOutcomes(root);
+  }
+
+  function eligibleWorkOwners() {
+    const eligible = State.people.filter((p) => yesValue(p.CanOwnWork)).map((p) => p.DisplayName || p.Name || p.Person || p.Email).filter(Boolean);
+    return eligible.length ? Array.from(new Set(eligible)).sort() : (State.config.Owners || []).slice();
+  }
+  function yesValue(v) { return /^(yes|y|true|1)$/i.test(String(v || "").trim()); }
+  function personRecord(name) { return State.people.find((p) => [p.DisplayName,p.Name,p.Person,p.Email].some((v) => String(v || "").trim() === String(name || "").trim())); }
+  function capacityManaged(name) { const p = personRecord(name); return !!p && yesValue(p.CapacityManaged); }
+  function outcomesForWorkstream(id) { return State.outcomes.filter((o) => String(o.WorkstreamID) === String(id)); }
+  function resultsForOutcome(id) { return State.outcomeResults.filter((r) => String(r.OutcomeID) === String(id)).sort((a,b) => String(b.AsOfDate || b.LastUpdated).localeCompare(String(a.AsOfDate || a.LastUpdated))); }
+  function measuresForOutcome(id) { return State.outcomeMeasures.filter((m) => String(m.OutcomeID) === String(id)); }
+  function outcomeWarnings(o) {
+    const out = [], measures = measuresForOutcome(o.OutcomeID), results = resultsForOutcome(o.OutcomeID), latest = results[0];
+    if (!String(o.LinkedKeyResultIDs || "").trim()) out.push("Missing KR link");
+    if (latest && measures[0] && latest.Unit && measures[0].Unit && String(latest.Unit) !== String(measures[0].Unit)) out.push("Target/actual unit mismatch");
+    if (latest && !latest.AsOfDate) out.push("Missing actual date");
+    if (latest && !latest.Source) out.push("Missing actual source");
+    if (latest && String(latest.PerformanceStatus || "").match(/risk|off|below/i) && !latest.VarianceReason) out.push("Material variance needs a reason");
+    return out;
+  }
+  function enhanceWorkstreamsWithOutcomes(root) {
+    root.querySelectorAll(".ws-card").forEach((card) => {
+      const name = card.querySelector(".ws-name");
+      const ws = State.workstreams.find((w) => name && name.textContent.trim() === String(w.Name || w.WorkstreamID).trim());
+      if (!ws) return;
+      const outcomes = outcomesForWorkstream(ws.WorkstreamID);
+      const section = document.createElement("section"); section.className = "outcome-section";
+      section.innerHTML = '<div class="outcome-section-head"><div><strong>Outcomes</strong><small>Results this workstream is accountable for</small></div><button class="btn-link" type="button">+ Add outcome</button></div>' +
+        (outcomes.length ? '<div class="outcome-card-list">' + outcomes.map(renderOutcomeCard).join("") + '</div>' : '<div class="outcome-empty">No outcomes linked yet.</div>');
+      section.querySelector("button").addEventListener("click", () => openOutcomeEditor(null, ws.WorkstreamID));
+      section.querySelectorAll("[data-outcome]").forEach((b) => b.addEventListener("click", () => openOutcomeEditor(State.outcomes.find((o) => String(o.OutcomeID) === b.dataset.outcome), ws.WorkstreamID)));
+      card.appendChild(section);
+    });
+  }
+  function renderOutcomeCard(o) {
+    const latest = resultsForOutcome(o.OutcomeID)[0], warnings = outcomeWarnings(o);
+    return '<button class="outcome-card" type="button" data-outcome="' + escapeAttr(o.OutcomeID) + '"><span class="outcome-card-top"><strong>' + escapeHtml(o.OutcomeName || o.OutcomeID) + '</strong><em class="outcome-status">' + escapeHtml(latest ? (latest.PerformanceStatus || latest.ResultType || "Updated") : "No result") + '</em></span><span class="outcome-owner">Owner: ' + escapeHtml(o.Owner || "Unassigned") + '</span><span class="outcome-result">' + escapeHtml(latest ? ((latest.Value || "—") + (latest.Unit ? " " + latest.Unit : "") + (latest.AsOfDate ? " · " + latest.AsOfDate : "")) : "Add a forecast or actual result") + '</span>' + (warnings.length ? '<span class="dq-warning">⚠ ' + escapeHtml(warnings.join(" · ")) + '</span>' : '') + '</button>';
+  }
+  function openOutcomeEditor(outcome, workstreamId) {
+    const o = outcome || {}, measures = outcome ? measuresForOutcome(o.OutcomeID) : [], latest = outcome ? resultsForOutcome(o.OutcomeID)[0] : null;
+    const locked = !!(measures[0] && String(measures[0].OriginalTarget || "").trim());
+    const body = '<div class="go-edit-grid outcome-editor">' +
+      '<label>Outcome name<input data-f="OutcomeName" value="' + escapeAttr(o.OutcomeName || "") + '"></label>' +
+      '<label>Owner<select data-f="Owner"><option value=""></option>' + optionMarkup(eligibleWorkOwners(), o.Owner) + '</select></label>' +
+      '<label>Internal accountable role<input data-f="InternalAccountableRole" value="' + escapeAttr(o.InternalAccountableRole || "") + '"></label>' +
+      '<label>Linked KRs<input data-f="LinkedKeyResultIDs" value="' + escapeAttr(o.LinkedKeyResultIDs || "") + '" placeholder="KR1; KR2"></label>' +
+      '<label class="wide">Description<textarea data-f="Description">' + escapeHtml(o.Description || "") + '</textarea></label>' +
+      '<div class="wide outcome-editor-section"><strong>Measure and latest result</strong><small>The original target locks after the first save. Use correction reason to change it.</small></div>' +
+      '<label>Measure<input data-measure="MeasureName" value="' + escapeAttr(measures[0] ? measures[0].MeasureName : "") + '"></label>' +
+      '<label>Unit<input data-measure="Unit" value="' + escapeAttr(measures[0] ? measures[0].Unit : "") + '"></label>' +
+      '<label>Original target<input data-measure="OriginalTarget" ' + (locked ? 'readonly class="locked-field"' : '') + ' value="' + escapeAttr(measures[0] ? measures[0].OriginalTarget : "") + '"></label>' +
+      '<label>Target correction reason<input data-measure="TargetCorrectionReason" placeholder="Required only for an approved correction"></label>' +
+      '<label>Result type<select data-result="ResultType">' + optionMarkup(["Forecast","Actual"], latest ? latest.ResultType : "Actual") + '</select></label>' +
+      '<label>Latest result<input data-result="Value" value="' + escapeAttr(latest ? latest.Value : "") + '"></label>' +
+      '<label>As-of date<input data-result="AsOfDate" type="date" value="' + escapeAttr(latest ? latest.AsOfDate : "") + '"></label>' +
+      '<label>Source<input data-result="Source" value="' + escapeAttr(latest ? latest.Source : "") + '"></label>' +
+      '<label>Status<select data-result="PerformanceStatus">' + optionMarkup(["On Track","Watch","At Risk","Achieved"], latest ? latest.PerformanceStatus : "On Track") + '</select></label>' +
+      '<label>Pts % Done<input data-result="PtsPercentDone" type="number" min="0" max="100" value="' + escapeAttr(latest ? latest.PtsPercentDone : "") + '"></label>' +
+      '<label class="wide">Variance reason<textarea data-result="VarianceReason">' + escapeHtml(latest ? latest.VarianceReason : "") + '</textarea></label>' +
+      '<label class="wide">Evidence<textarea data-result="Evidence">' + escapeHtml(latest ? latest.Evidence : (o.Evidence || "")) + '</textarea></label>' +
+      '<div class="wide outcome-editor-section"><strong>Value and readout</strong></div>' +
+      ["ValueType","Maturity","Recurrence","Scope","FiscalYear"].map((x) => '<label>' + x.replace(/([A-Z])/g," $1").trim() + '<input data-f="' + x + '" value="' + escapeAttr(o[x] || "") + '"></label>').join("") +
+      '<label>Readout eligible<select data-f="ReadoutEligible">' + optionMarkup(["No","Yes"], o.ReadoutEligible || "No") + '</select></label>' +
+      '<label>Statement locked<select data-f="StatementLocked">' + optionMarkup(["No","Yes"], o.StatementLocked || "No") + '</select></label>' +
+      '<label class="wide">Approved statement<textarea data-f="ApprovedStatement" ' + (String(o.StatementLocked).toLowerCase() === "yes" ? 'readonly class="locked-field"' : '') + '>' + escapeHtml(o.ApprovedStatement || "") + '</textarea></label></div>';
+    showStage2Editor(outcome ? "Edit outcome" : "Add outcome", body, async (host) => {
+      const fields = editorValues(host); fields.OutcomeID = o.OutcomeID; fields.WorkstreamID = workstreamId;
+      if (!fields.OutcomeName.trim()) throw new Error("Outcome name is required.");
+      if (!fields.Owner) throw new Error("Outcome owner is required.");
+      if (String(o.StatementLocked).toLowerCase() === "yes" && fields.ApprovedStatement !== String(o.ApprovedStatement || "")) throw new Error("Approved statement is locked. Use the correction flow.");
+      const saved = await window.WsjfData.upsertOutcome(fields);
+      const mf = {}; host.querySelectorAll("[data-measure]").forEach((el) => { mf[el.dataset.measure] = el.value; });
+      mf.MeasureID = measures[0] && measures[0].MeasureID; mf.OutcomeID = saved.OutcomeID;
+      if (locked && mf.TargetCorrectionReason) { mf.TargetCorrectionApproved = "Yes"; const target = host.querySelector('[data-measure="OriginalTarget"]'); if (target) target.readOnly = false; }
+      const savedMeasure = await window.WsjfData.upsertOutcomeMeasure(mf);
+      const rf = {}; host.querySelectorAll("[data-result]").forEach((el) => { rf[el.dataset.result] = el.value; });
+      rf.ResultID = latest && latest.ResultID; rf.OutcomeID = saved.OutcomeID; rf.MeasureID = savedMeasure.MeasureID; rf.Unit = mf.Unit;
+      if (rf.Value && !rf.AsOfDate) throw new Error("As-of date is required when an actual or forecast result is entered.");
+      if (rf.Value && !rf.Source) throw new Error("Source is required when an actual or forecast result is entered.");
+      if (rf.Value) await window.WsjfData.upsertOutcomeResult(rf);
+      toast("Saved outcome " + saved.OutcomeID, "success");
+    }, outcome ? () => window.WsjfData.archiveOutcome(o.OutcomeID) : null);
+  }
+
   function renderWsDashboard() {
     const q = State.wsQuarter;
     const qtasks = State.tasks.filter((t) => t.Quarter === q);
@@ -4608,7 +4710,7 @@
       if (!text) return;
       if (!currentEditingTask || !currentEditingTask.TaskID) { toast("Save the task first, then add updates.", "warn"); return; }
       try {
-        await window.WsjfData.createUpdate({ ParentType: "Task", ParentID: currentEditingTask.TaskID, Text: text });
+        await window.WsjfData.createUpdate({ ParentType: "Task", ParentID: currentEditingTask.TaskID, Text: text, FeedbackClass: document.getElementById("m-update-class").value });
         ta.value = "";
         renderUpdates(await window.WsjfData.readUpdatesForParent("Task", currentEditingTask.TaskID));
         toast("Update posted.", "info");
@@ -4654,7 +4756,7 @@
   function taskDraftKey() { return "pmTaskDraft:" + (currentEditingTask && currentEditingTask.TaskID ? currentEditingTask.TaskID : "new"); }
   function captureTaskDraft() {
     if (!State.modalOpen || !currentEditingTask) return;
-    const ids = ["m-title","m-description","m-owner","m-workstream","m-quarter","m-status","m-health","m-start","m-due","m-rgroup"];
+    const ids = ["m-title","m-description","m-owner","m-workstream","m-quarter","m-status","m-health","m-start","m-due","m-rgroup","m-primary-outcome","m-waiting-on","m-dependency-owner","m-dependency-date","m-dependency-status","m-date-source","m-accountable-role","m-acceptance-criteria"];
     const fields = {}; ids.forEach((id) => { const el=document.getElementById(id); if(el) fields[id]=el.value; });
     lsSet(taskDraftKey(), JSON.stringify({ savedAt: Date.now(), fields: fields, contributors: currentContributors(), tags: currentTags() }));
     const note=document.getElementById("m-draft-state"); if(note) note.textContent="Draft protected locally";
@@ -4850,10 +4952,21 @@
     })();
     document.getElementById("m-epic").textContent = t.LinkedEpic || "—";
     document.getElementById("m-source").textContent = t.Source || "—";
+    const availableOutcomes = State.outcomes.filter((o) => !t.WorkstreamID || String(o.WorkstreamID) === String(t.WorkstreamID));
+    fillSelect("m-primary-outcome", [{value:"",label:"— Select an outcome —"}].concat(availableOutcomes.map((o) => ({value:o.OutcomeID,label:o.OutcomeName || o.OutcomeID}))), "— Select an outcome —", t.PrimaryOutcomeID || "");
+    const linkedOutcomeIds = new Set(State.taskOutcomeLinks.filter((l) => String(l.ParentType) === "Task" && String(l.ParentID) === String(t.TaskID)).map((l) => String(l.OutcomeID)));
+    document.getElementById("m-outcomes").innerHTML = availableOutcomes.map((o) => '<label class="contrib-check"><input type="checkbox" value="' + escapeAttr(o.OutcomeID) + '" ' + (linkedOutcomeIds.has(String(o.OutcomeID)) ? "checked" : "") + '>' + escapeHtml(o.OutcomeName || o.OutcomeID) + '</label>').join("") || '<span class="muted">No outcomes exist for this workstream.</span>';
+    document.getElementById("m-waiting-on").value = t.WaitingOn || "";
+    fillSelect("m-dependency-owner", [""].concat(eligibleWorkOwners()), "— None —", t.DependencyOwner || "");
+    document.getElementById("m-dependency-date").value = isoDate(t.DependencyDate);
+    document.getElementById("m-dependency-status").value = t.DependencyStatus || "";
+    document.getElementById("m-date-source").value = t.DateSource || "";
+    document.getElementById("m-accountable-role").value = t.InternalAccountableRole || "";
+    document.getElementById("m-acceptance-criteria").value = t.AcceptanceCriteria || "";
 
     // Preserve the stored owner even if it's not in the Owners list (e.g. a
     // legacy multi-owner "A; B" value) so opening+saving never wipes it.
-    const ownerOpts = ["", ...State.config.Owners];
+    const ownerOpts = ["", ...eligibleWorkOwners()];
     if (t.Owner && ownerOpts.indexOf(t.Owner) < 0) ownerOpts.push(t.Owner);
     fillSelect("m-owner", ownerOpts, "— Unassigned —", t.Owner);
     renderContributors(String(t.Contributors || "").split(/[;,]/).map((x) => x.trim()).filter(Boolean));
@@ -5598,8 +5711,21 @@
     t.BlockedByTaskIDs   = currentBlockedIds().join(",");
     const rgEl = document.getElementById("m-rgroup");
     if (rgEl) t.RoadmapGroup = rgEl.value.trim();
+    t.PrimaryOutcomeID = document.getElementById("m-primary-outcome").value;
+    t.WaitingOn = document.getElementById("m-waiting-on").value.trim();
+    t.DependencyOwner = document.getElementById("m-dependency-owner").value;
+    t.DependencyDate = document.getElementById("m-dependency-date").value || "";
+    t.DependencyStatus = document.getElementById("m-dependency-status").value;
+    t.DateSource = document.getElementById("m-date-source").value;
+    t.AcceptanceCriteria = document.getElementById("m-acceptance-criteria").value.trim();
+    t.InternalAccountableRole = document.getElementById("m-accountable-role").value.trim();
 
-    if (!t.Title) { toast("Title is required.", "warn"); return; }
+    if (!t.Title) { toast("Missing field: Title.", "warn"); return; }
+    if (!t.PrimaryOutcomeID) { toast("Missing field: Primary Outcome.", "warn"); return; }
+    if (t.WaitingOn && !t.DependencyOwner) { toast("Missing field: Dependency owner.", "warn"); return; }
+    if (t.WaitingOn && !t.DependencyStatus) { toast("Missing field: Dependency status.", "warn"); return; }
+    if (!t.DateSource && (t.StartDate || t.DueDate)) { toast("Missing field: Date Source.", "warn"); return; }
+    if (!t.AcceptanceCriteria) { toast("Missing field: Acceptance Criteria.", "warn"); return; }
     if (t.RoadmapGroup) { const fit = taskFitsGroupEnvelope(t, t.WorkstreamID, t.RoadmapGroup, t.StartDate, t.DueDate); if (!fit.ok) { toast("Task dates must remain inside group “" + t.RoadmapGroup + "” (" + formatDateShort(fit.start) + " – " + formatDateShort(fit.end) + "). Resize the group first.", "warn"); return; } }
     if (!currentTaskGoals().length) { toast("Select at least one objective before saving.", "warn"); return; }
     if (!currentTaskKeyResults().length) { toast("Select at least one key result before saving.", "warn"); return; }
@@ -5683,6 +5809,12 @@
 
       await window.WsjfData.syncTaskKeyResultLinks("Task", t.TaskID, currentTaskKeyResults(), State.me.name, isCompleteStatus(t.Status));
       if (t.RoadmapGroup && !roadmapGroupRecord(t.WorkstreamID, t.RoadmapGroup)) { const range = taskEffectiveRange(t); await window.WsjfData.upsertRoadmapGroup({ WorkstreamID: t.WorkstreamID, Name: t.RoadmapGroup, StartDate: range.s, EndDate: range.e, SortOrder: 9999, Source: "Product Management Tool", Archived: "No" }); State.roadmapGroups = await window.WsjfData.readRoadmapGroups(); }
+      const outcomeIds = Array.from(document.querySelectorAll("#m-outcomes input:checked")).map((el) => el.value);
+      if (t.PrimaryOutcomeID && !outcomeIds.includes(t.PrimaryOutcomeID)) outcomeIds.unshift(t.PrimaryOutcomeID);
+      await window.WsjfData.syncTaskOutcomeLinks("Task", t.TaskID, outcomeIds, t.PrimaryOutcomeID);
+      const verifyTask = await window.WsjfData.readTaskById(t.TaskID);
+      if (!verifyTask || String(verifyTask.PrimaryOutcomeID || "") !== String(t.PrimaryOutcomeID || "")) throw new Error("Task save could not be verified. Form data was preserved.");
+      toast("Saved task " + t.TaskID, "success");
       modalDirty = false;
       clearTaskDraft();
       State.keyResultLinks = await window.WsjfData.readTaskKeyResultLinks();
@@ -5975,6 +6107,7 @@
   }
   // Demonstrated baseline = points completed in Q1 (fixed all year, per plan).
   function personVelocity(person) {
+    if (!capacityManaged(person)) return 0;
     let pts = 0;
     State.tasks.forEach((t) => {
       if (t.Quarter === "Q1" && isCompleteStatus(t.Status) && ownerMatchesPerson(t, person)) pts += Number(t.JobSize) || 0;
@@ -5997,12 +6130,14 @@
   // Capacity follows the workbook model: baseline throughput × availability,
   // plus the quarter-specific point adjustment, floored at zero.
   function personCapacity(person, quarter) {
+    if (!capacityManaged(person)) return 0;
     const c = State.capacity[person] || {};
     const adjustment = quarter && c.adjustment ? (Number(c.adjustment[quarter]) || 0) : 0;
     return Math.max(0, Math.round((personBaseline(person) * personAvailability(person, quarter) + adjustment) * 10) / 10);
   }
   // Committed points for a person in a quarter (optionally excluding one task).
   function plannedPoints(person, quarter, exceptTaskId) {
+    if (!capacityManaged(person)) return 0;
     let pts = 0;
     State.tasks.forEach((t) => {
       if (quarter && t.Quarter !== quarter) return;
