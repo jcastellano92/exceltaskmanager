@@ -61,6 +61,7 @@
     outcomeMeasures: [],
     outcomeResults: [],
     taskOutcomeLinks: [],
+    valueMetricsStatus: { mode: "unknown", message: "Value Metrics status has not been checked." },
     roadmapGroups: [],
     people: [],
     personWorkstreams: [],
@@ -166,8 +167,8 @@
       "readRoadmapGroups", "upsertRoadmapGroup", "deleteRoadmapGroup", "importRoadmapGroups", "saveSubtasksBatch",
       "readPeople", "readPersonWorkstreams", "upsertPerson", "upsertPersonWorkstream", "deletePersonWorkstream",
       "readWorkstreamLinks", "readWorkstreamDocuments", "upsertWorkstreamLink", "deleteWorkstreamLink", "upsertWorkstreamDocument", "deleteWorkstreamDocument",
-      "upsertOutcome", "upsertOutcomeMeasure", "upsertOutcomeResult", "archiveOutcome", "syncTaskOutcomeLinks",
-      "readOutcomes", "readOutcomeMeasures", "readOutcomeResults", "readTaskOutcomeLinks", "upsertOutcome", "upsertOutcomeMeasure", "upsertOutcomeResult", "archiveOutcome", "syncTaskOutcomeLinks"
+      "upsertOutcome", "upsertOutcomeMeasure", "createOutcomeResult", "correctOutcomeResult", "archiveOutcome", "syncTaskOutcomeLinks",
+      "readOutcomes", "readOutcomeMeasures", "readOutcomeResults", "readTaskOutcomeLinks", "readValueMetricsStatus", "upsertOutcome", "upsertOutcomeMeasure", "createOutcomeResult", "correctOutcomeResult", "archiveOutcome", "syncTaskOutcomeLinks"
     ];
     const api = {};
     methods.forEach((m) => {
@@ -205,7 +206,7 @@
       "upsertRoadmapGroup", "deleteRoadmapGroup", "importRoadmapGroups", "saveSubtasksBatch",
       "upsertPerson", "upsertPersonWorkstream", "deletePersonWorkstream",
       "upsertWorkstreamLink", "deleteWorkstreamLink", "upsertWorkstreamDocument", "deleteWorkstreamDocument",
-      "upsertOutcome", "upsertOutcomeMeasure", "upsertOutcomeResult", "archiveOutcome", "syncTaskOutcomeLinks"
+      "upsertOutcome", "upsertOutcomeMeasure", "createOutcomeResult", "correctOutcomeResult", "archiveOutcome", "syncTaskOutcomeLinks"
     ];
     let chain = Promise.resolve();
     mutating.forEach((m) => {
@@ -310,6 +311,7 @@
       State.outcomeMeasures = await window.WsjfData.readOutcomeMeasures();
       State.outcomeResults = await window.WsjfData.readOutcomeResults();
       State.taskOutcomeLinks = await window.WsjfData.readTaskOutcomeLinks();
+      State.valueMetricsStatus = await window.WsjfData.readValueMetricsStatus();
     } catch (e) { State.outcomes = []; State.outcomeMeasures = []; State.outcomeResults = []; State.taskOutcomeLinks = []; console.warn("Outcome tables unavailable:", e.message); }
     try { State.workstreamLinks = await window.WsjfData.readWorkstreamLinks(); State.workstreamDocuments = await window.WsjfData.readWorkstreamDocuments(); }
     catch (e) { State.workstreamLinks = []; State.workstreamDocuments = []; console.warn("Workstream resources unavailable:", e.message); }
@@ -848,6 +850,7 @@
       if (!(await uiConfirm("Archive this item? Existing historical links will remain.", { okText: "Archive" }))) return;
       await archiveAction(); overlay.remove(); await loadConfigAndDimensions(); render();
     });
+    return overlay;
   }
 
   function openGoalEditor(goal, afterCreate) {
@@ -2287,54 +2290,50 @@
       card.appendChild(section);
     });
   }
+  function resultIsFormulaLinked(result) {
+    return Array.isArray(result && result._formulaFields) && result._formulaFields.length > 0;
+  }
+  function latestResult(measureId, type) {
+    return State.outcomeResults.filter((r) => String(r.MeasureID) === String(measureId) && String(r.ResultType).toLowerCase() === type.toLowerCase())
+      .sort((a, b) => String(b.AsOfDate || b.LastUpdated || "").localeCompare(String(a.AsOfDate || a.LastUpdated || "")))[0] || null;
+  }
   function renderOutcomeCard(o) {
-    const latest = resultsForOutcome(o.OutcomeID)[0], warnings = outcomeWarnings(o);
-    return '<button class="outcome-card" type="button" data-outcome="' + escapeAttr(o.OutcomeID) + '"><span class="outcome-card-top"><strong>' + escapeHtml(o.OutcomeName || o.OutcomeID) + '</strong><em class="outcome-status">' + escapeHtml(latest ? (latest.PerformanceStatus || latest.ResultType || "Updated") : "No result") + '</em></span><span class="outcome-owner">Owner: ' + escapeHtml(o.Owner || "Unassigned") + '</span><span class="outcome-result">' + escapeHtml(latest ? ((latest.Value || "—") + (latest.Unit ? " " + latest.Unit : "") + (latest.AsOfDate ? " · " + latest.AsOfDate : "")) : "Add a forecast or actual result") + '</span>' + (warnings.length ? '<span class="dq-warning">⚠ ' + escapeHtml(warnings.join(" · ")) + '</span>' : '') + '</button>';
+    const measures = measuresForOutcome(o.OutcomeID), warnings = outcomeWarnings(o);
+    const latest = measures.map((m) => latestResult(m.MeasureID, "Actual") || latestResult(m.MeasureID, "Forecast")).filter(Boolean)[0];
+    return '<button class="outcome-card" type="button" data-outcome="' + escapeAttr(o.OutcomeID) + '"><span class="outcome-card-top"><strong>' + escapeHtml(o.OutcomeName || o.OutcomeID) + '</strong><em class="outcome-status">' + escapeHtml(o.Status || (latest ? latest.PerformanceStatus : "No result")) + '</em></span><span class="outcome-owner">' + escapeHtml(measures.length + " measure" + (measures.length === 1 ? "" : "s") + " · Owner: " + (o.Owner || "Unassigned")) + '</span><span class="outcome-result">' + escapeHtml(latest ? ((latest.ResultType || "Result") + ": " + latest.Value + (latest.Unit ? " " + latest.Unit : "") + (latest.AsOfDate ? " · " + latest.AsOfDate : "")) : "Add a forecast or actual observation") + '</span>' + (warnings.length ? '<span class="dq-warning">⚠ ' + escapeHtml(warnings.join(" · ")) + '</span>' : '') + '</button>';
+  }
+  function measureCardHtml(measure) {
+    const m = measure || {}, history = m.MeasureID ? State.outcomeResults.filter((r) => String(r.MeasureID) === String(m.MeasureID)).sort((a,b) => String(b.AsOfDate || "").localeCompare(String(a.AsOfDate || ""))) : [];
+    const forecast = m.MeasureID ? latestResult(m.MeasureID, "Forecast") : null, actual = m.MeasureID ? latestResult(m.MeasureID, "Actual") : null;
+    const historyRows = history.map((r) => '<tr><td>' + escapeHtml(r.ResultType || "") + '</td><td>' + escapeHtml(String(r.Value == null ? "" : r.Value)) + '</td><td>' + escapeHtml(r.AsOfDate || "") + '</td><td>' + escapeHtml(r.PerformanceStatus || "") + '</td><td>' + (resultIsFormulaLinked(r) ? '<span class="formula-pill">Live formula</span>' : '<button type="button" class="result-correct" data-correct-result="' + escapeAttr(r.ResultID) + '">Correct</button>') + '</td></tr>').join("");
+    const metricState = m.SourceMetricID && State.valueMetricsStatus.mode !== "normalized" ? '<div class="metric-warning">' + escapeHtml(State.valueMetricsStatus.message) + ' SourceMetricID: ' + escapeHtml(m.SourceMetricID) + '</div>' : '';
+    return '<details class="measure-card" data-measure-id="' + escapeAttr(m.MeasureID || "") + '" open><summary><span><strong>' + escapeHtml(m.MeasureName || "New measure") + '</strong><small>' + escapeHtml(m.SourceKeyResultID || "No source KR") + '</small></span><span class="measure-latest">F: ' + escapeHtml(forecast ? String(forecast.Value) : "—") + ' · A: ' + escapeHtml(actual ? String(actual.Value) : "—") + '</span></summary><div class="measure-card-body">' + metricState + '<div class="go-edit-grid"><label>Name<input data-mf="MeasureName" value="' + escapeAttr(m.MeasureName || "") + '"></label><label>Source KR<input data-mf="SourceKeyResultID" value="' + escapeAttr(m.SourceKeyResultID || "") + '"></label><label>Unit<input data-mf="Unit" value="' + escapeAttr(m.Unit || "") + '"></label><label>Direction<input data-mf="Direction" value="' + escapeAttr(m.Direction || "") + '"></label><label>Comparator<input data-mf="Comparator" value="' + escapeAttr(m.Comparator || "") + '"></label><label>Original target<input data-mf="OriginalTarget" value="' + escapeAttr(m.OriginalTarget || "") + '" ' + (m.OriginalTarget ? 'readonly class="locked-field"' : '') + '></label><label>Baseline<input data-mf="Baseline" value="' + escapeAttr(m.Baseline || "") + '"></label><label>Source metric ID<input data-mf="SourceMetricID" value="' + escapeAttr(m.SourceMetricID || "") + '"></label><label class="wide">Definition<textarea data-mf="Definition">' + escapeHtml(m.Definition || "") + '</textarea></label><label class="wide correction-only">Target correction reason<input data-mf="TargetCorrectionReason" placeholder="Required to change the original target"></label></div><div class="measure-actions"><button class="btn btn-secondary" type="button" data-save-measure>Save measure</button><button class="btn btn-link" type="button" data-enable-target-correction>Correct original target</button></div>' + (m.MeasureID ? '<section class="result-entry"><h4>Record a new observation</h4><div class="go-edit-grid"><label>Type<select data-rf="ResultType">' + optionMarkup(["Forecast","Actual"], "Forecast") + '</select></label><label>Value<input data-rf="Value"></label><label>As-of date<input data-rf="AsOfDate" type="date"></label><label>Performance status<input data-rf="PerformanceStatus"></label><label>Source<input data-rf="Source"></label><label>Evidence URL<input data-rf="EvidenceURL"></label><label>Evidence status<input data-rf="EvidenceStatus"></label><label>Validation method<input data-rf="ValidationMethod"></label><label class="wide">Variance reason<textarea data-rf="VarianceReason"></textarea></label></div><button class="btn btn-primary" type="button" data-add-result>Add observation</button></section><section class="result-history"><h4>Observation history</h4><table><thead><tr><th>Type</th><th>Value</th><th>As of</th><th>Status</th><th>Action</th></tr></thead><tbody>' + (historyRows || '<tr><td colspan="5">No observations recorded.</td></tr>') + '</tbody></table></section>' : '<div class="outcome-empty">Save this measure before adding observations.</div>') + '</div></details>';
   }
   function openOutcomeEditor(outcome, workstreamId) {
-    const o = outcome || {}, measures = outcome ? measuresForOutcome(o.OutcomeID) : [], latest = outcome ? resultsForOutcome(o.OutcomeID)[0] : null;
-    const locked = !!(measures[0] && String(measures[0].OriginalTarget || "").trim());
-    const body = '<div class="go-edit-grid outcome-editor">' +
-      '<label>Outcome name<input data-f="OutcomeName" value="' + escapeAttr(o.OutcomeName || "") + '"></label>' +
-      '<label>Owner<select data-f="Owner"><option value=""></option>' + optionMarkup(eligibleWorkOwners(), o.Owner) + '</select></label>' +
-      '<label>Internal accountable role<input data-f="InternalAccountableRole" value="' + escapeAttr(o.InternalAccountableRole || "") + '"></label>' +
-      '<label>Linked KRs<input data-f="LinkedKeyResultIDs" value="' + escapeAttr(o.LinkedKeyResultIDs || "") + '" placeholder="KR1; KR2"></label>' +
-      '<label class="wide">Description<textarea data-f="Description">' + escapeHtml(o.Description || "") + '</textarea></label>' +
-      '<div class="wide outcome-editor-section"><strong>Measure and latest result</strong><small>The original target locks after the first save. Use correction reason to change it.</small></div>' +
-      '<label>Measure<input data-measure="MeasureName" value="' + escapeAttr(measures[0] ? measures[0].MeasureName : "") + '"></label>' +
-      '<label>Unit<input data-measure="Unit" value="' + escapeAttr(measures[0] ? measures[0].Unit : "") + '"></label>' +
-      '<label>Original target<input data-measure="OriginalTarget" ' + (locked ? 'readonly class="locked-field"' : '') + ' value="' + escapeAttr(measures[0] ? measures[0].OriginalTarget : "") + '"></label>' +
-      '<label>Target correction reason<input data-measure="TargetCorrectionReason" placeholder="Required only for an approved correction"></label>' +
-      '<label>Result type<select data-result="ResultType">' + optionMarkup(["Forecast","Actual"], latest ? latest.ResultType : "Actual") + '</select></label>' +
-      '<label>Latest result<input data-result="Value" value="' + escapeAttr(latest ? latest.Value : "") + '"></label>' +
-      '<label>As-of date<input data-result="AsOfDate" type="date" value="' + escapeAttr(latest ? latest.AsOfDate : "") + '"></label>' +
-      '<label>Source<input data-result="Source" value="' + escapeAttr(latest ? latest.Source : "") + '"></label>' +
-      '<label>Status<select data-result="PerformanceStatus">' + optionMarkup(["On Track","Watch","At Risk","Achieved"], latest ? latest.PerformanceStatus : "On Track") + '</select></label>' +
-      '<label>Pts % Done<input data-result="PtsPercentDone" type="number" min="0" max="100" value="' + escapeAttr(latest ? latest.PtsPercentDone : "") + '"></label>' +
-      '<label class="wide">Variance reason<textarea data-result="VarianceReason">' + escapeHtml(latest ? latest.VarianceReason : "") + '</textarea></label>' +
-      '<label class="wide">Evidence<textarea data-result="Evidence">' + escapeHtml(latest ? latest.Evidence : (o.Evidence || "")) + '</textarea></label>' +
-      '<div class="wide outcome-editor-section"><strong>Value and readout</strong></div>' +
-      ["ValueType","Maturity","Recurrence","Scope","FiscalYear"].map((x) => '<label>' + x.replace(/([A-Z])/g," $1").trim() + '<input data-f="' + x + '" value="' + escapeAttr(o[x] || "") + '"></label>').join("") +
-      '<label>Readout eligible<select data-f="ReadoutEligible">' + optionMarkup(["No","Yes"], o.ReadoutEligible || "No") + '</select></label>' +
-      '<label>Statement locked<select data-f="StatementLocked">' + optionMarkup(["No","Yes"], o.StatementLocked || "No") + '</select></label>' +
-      '<label class="wide">Approved statement<textarea data-f="ApprovedStatement" ' + (String(o.StatementLocked).toLowerCase() === "yes" ? 'readonly class="locked-field"' : '') + '>' + escapeHtml(o.ApprovedStatement || "") + '</textarea></label></div>';
-    showStage2Editor(outcome ? "Edit outcome" : "Add outcome", body, async (host) => {
+    const o = outcome || {}, measures = outcome ? measuresForOutcome(o.OutcomeID) : [];
+    const body = '<div class="go-edit-grid outcome-editor"><label>Outcome name<input data-f="OutcomeName" value="' + escapeAttr(o.OutcomeName || "") + '"></label><label>Owner<select data-f="Owner"><option value=""></option>' + optionMarkup(eligibleWorkOwners(), o.Owner) + '</select></label><label>Internal accountable<input data-f="InternalAccountable" value="' + escapeAttr(o.InternalAccountable || "") + '"></label><label>Outcome type<input data-f="OutcomeType" value="' + escapeAttr(o.OutcomeType || "") + '"></label><label>Status<input data-f="Status" value="' + escapeAttr(o.Status || "") + '"></label><label>Target date<input data-f="TargetDate" type="date" value="' + escapeAttr(toDateInput(o.TargetDate)) + '"></label><label class="wide">Description<textarea data-f="Description">' + escapeHtml(o.Description || "") + '</textarea></label><label class="wide">Approved statement<textarea data-f="ApprovedStatement" ' + (String(o.StatementLocked).toLowerCase() === "yes" ? 'readonly class="locked-field"' : '') + '>' + escapeHtml(o.ApprovedStatement || "") + '</textarea></label></div><div class="measure-editor-head"><div><strong>Measures</strong><small>Forecast and Actual histories remain independent.</small></div><button type="button" class="btn btn-secondary" data-add-measure>+ Add measure</button></div><div class="measure-card-list">' + measures.map(measureCardHtml).join("") + '</div>';
+    const overlay = showStage2Editor(outcome ? "Outcome detail" : "Add outcome", body, async (host) => {
       const fields = editorValues(host); fields.OutcomeID = o.OutcomeID; fields.WorkstreamID = workstreamId;
       if (!fields.OutcomeName.trim()) throw new Error("Outcome name is required.");
       if (!fields.Owner) throw new Error("Outcome owner is required.");
-      if (String(o.StatementLocked).toLowerCase() === "yes" && fields.ApprovedStatement !== String(o.ApprovedStatement || "")) throw new Error("Approved statement is locked. Use the correction flow.");
-      const saved = await window.WsjfData.upsertOutcome(fields);
-      const mf = {}; host.querySelectorAll("[data-measure]").forEach((el) => { mf[el.dataset.measure] = el.value; });
-      mf.MeasureID = measures[0] && measures[0].MeasureID; mf.OutcomeID = saved.OutcomeID;
-      if (locked && mf.TargetCorrectionReason) { mf.TargetCorrectionApproved = "Yes"; const target = host.querySelector('[data-measure="OriginalTarget"]'); if (target) target.readOnly = false; }
-      const savedMeasure = await window.WsjfData.upsertOutcomeMeasure(mf);
-      const rf = {}; host.querySelectorAll("[data-result]").forEach((el) => { rf[el.dataset.result] = el.value; });
-      rf.ResultID = latest && latest.ResultID; rf.OutcomeID = saved.OutcomeID; rf.MeasureID = savedMeasure.MeasureID; rf.Unit = mf.Unit;
-      if (rf.Value && !rf.AsOfDate) throw new Error("As-of date is required when an actual or forecast result is entered.");
-      if (rf.Value && !rf.Source) throw new Error("Source is required when an actual or forecast result is entered.");
-      if (rf.Value) await window.WsjfData.upsertOutcomeResult(rf);
-      toast("Saved outcome " + saved.OutcomeID, "success");
+      const saved = await window.WsjfData.upsertOutcome(fields); toast("Saved outcome " + saved.OutcomeID, "success");
     }, outcome ? () => window.WsjfData.archiveOutcome(o.OutcomeID) : null);
+    const list = overlay.querySelector(".measure-card-list");
+    overlay.querySelector("[data-add-measure]").addEventListener("click", () => { list.insertAdjacentHTML("beforeend", measureCardHtml(null)); bindMeasureActions(); });
+    function bindMeasureActions() {
+      overlay.querySelectorAll(".measure-card").forEach((card) => {
+        if (card.dataset.bound) return; card.dataset.bound = "1";
+        const correctionButton = card.querySelector("[data-enable-target-correction]");
+        correctionButton.addEventListener("click", () => { const target = card.querySelector('[data-mf="OriginalTarget"]'); target.readOnly = false; target.classList.remove("locked-field"); card.querySelector(".correction-only").classList.add("active"); });
+        card.querySelector("[data-save-measure]").addEventListener("click", async () => {
+          try { const fields = { MeasureID: card.dataset.measureId, OutcomeID: o.OutcomeID }; card.querySelectorAll("[data-mf]").forEach((el) => { fields[el.dataset.mf] = el.value; }); if (!fields.OutcomeID) throw new Error("Save the outcome before adding measures."); if (fields.TargetCorrectionReason) fields.TargetCorrectionApproved = "Yes"; const saved = await window.WsjfData.upsertOutcomeMeasure(fields); toast("Saved measure " + saved.MeasureID, "success"); await loadConfigAndDimensions(); openOutcomeEditor(State.outcomes.find((x) => String(x.OutcomeID) === String(o.OutcomeID)) || o, workstreamId); } catch (err) { toast("Measure not saved: " + err.message, "error"); }
+        });
+        const add = card.querySelector("[data-add-result]");
+        if (add) add.addEventListener("click", async () => { try { const fields = { MeasureID: card.dataset.measureId }; card.querySelectorAll("[data-rf]").forEach((el) => { fields[el.dataset.rf] = el.value; }); const saved = await window.WsjfData.createOutcomeResult(fields); toast("Recorded " + saved.ResultID, "success"); await loadConfigAndDimensions(); openOutcomeEditor(State.outcomes.find((x) => String(x.OutcomeID) === String(o.OutcomeID)) || o, workstreamId); } catch (err) { toast("Observation not saved: " + err.message, "error"); } });
+        card.querySelectorAll("[data-correct-result]").forEach((button) => button.addEventListener("click", async () => { const reason = await uiPrompt("Correct observation", "Correction reason", ""); if (!reason) return; try { const saved = await window.WsjfData.correctOutcomeResult(button.dataset.correctResult, { CorrectionReason: reason }); toast("Correction saved as " + saved.ResultID, "success"); await loadConfigAndDimensions(); openOutcomeEditor(State.outcomes.find((x) => String(x.OutcomeID) === String(o.OutcomeID)) || o, workstreamId); } catch (err) { toast("Correction failed: " + err.message, "error"); } }));
+      });
+    }
+    bindMeasureActions();
   }
 
   function renderWsDashboard() {

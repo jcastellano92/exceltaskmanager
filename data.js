@@ -1091,73 +1091,143 @@
   }
 
 
-  // Outcome-focused portfolio data. Every read/write resolves columns by header name.
-  async function _nextPrefixedId(table, header, prefix) {
-    const rows = await _readTable(table);
-    let max = 0;
-    rows.forEach((r) => {
-      const m = String(r[header] || "").match(/(\d+)$/);
-      if (m) max = Math.max(max, Number(m[1]) || 0);
+  // Outcome-focused portfolio data. Workbook formulas remain authoritative and are never written by the UI.
+  const OUTCOME_WRITABLE = new Set(["OutcomeID","WorkstreamID","OutcomeName","Description","OutcomeType","Owner","InternalAccountable","Status","StartDate","TargetDate","ReadoutEligible","ApprovedStatement","StatementLocked","Archived","FiscalYear","CreatedDate","CreatedBy","ReadoutItem","ReadoutRole","LastUpdated","UpdatedBy"]);
+  const MEASURE_WRITABLE = new Set(["MeasureID","OutcomeID","MeasureName","Definition","Unit","Direction","Comparator","OriginalTarget","Baseline","TargetDate","ValueType","Recurrence","Scope","CanExceed100","EvidenceRequired","Archived","SourceKeyResultID","SourceMetricID","TargetCorrectionReason","TargetCorrectionApproved","CreatedDate","CreatedBy","LastUpdated","UpdatedBy"]);
+  const RESULT_MANUAL_WRITABLE = new Set(["ResultID","MeasureID","ResultType","Value","AsOfDate","PerformanceStatus","VarianceReason","EvidenceStatus","EvidenceURL","ValidationMethod","ValidatedBy","ValidatedDate","LastUpdated","UpdatedBy","CreatedDate","CreatedBy"]);
+
+  function _pickWritable(fields, allowed) {
+    const out = {};
+    Object.keys(fields || {}).forEach((key) => { if (allowed.has(key)) out[key] = fields[key]; });
+    return out;
+  }
+  function _sameId(a, b) { return String(a == null ? "" : a).trim() === String(b == null ? "" : b).trim(); }
+  function _isActive(row, idHeader) { return String(row[idHeader] || "").trim() && String(row.Archived || "").toLowerCase() !== "yes"; }
+
+  async function _readTableWithFormulaFlags(tableName) {
+    return Excel.run(async (ctx) => {
+      const tbl = ctx.workbook.tables.getItem(tableName);
+      const header = tbl.getHeaderRowRange();
+      const body = tbl.getDataBodyRangeOrNullObject();
+      header.load("values"); body.load("values, formulas, isNullObject");
+      await ctx.sync();
+      if (body.isNullObject) return [];
+      const headers = header.values[0];
+      return body.values.map((values, rowIndex) => {
+        const row = { _rowIndex: rowIndex, _formulaFields: [] };
+        headers.forEach((headerName, colIndex) => {
+          row[headerName] = values[colIndex];
+          const formula = body.formulas[rowIndex][colIndex];
+          if (typeof formula === "string" && formula.charAt(0) === "=") row._formulaFields.push(headerName);
+        });
+        return row;
+      });
     });
-    return prefix + (max + 1);
   }
 
-  async function readOutcomes() {
-    const rows = await _readTable(OUTCOME_TABLE);
-    return rows.filter((r) => String(r.OutcomeID || "").trim() && String(r.Archived || "").toLowerCase() !== "yes");
+  async function readOutcomes() { return (await _readTableWithFormulaFlags(OUTCOME_TABLE)).filter((r) => _isActive(r, "OutcomeID")); }
+  async function readOutcomeMeasures() { return (await _readTableWithFormulaFlags(MEASURE_TABLE)).filter((r) => _isActive(r, "MeasureID")); }
+  async function readOutcomeResults() { return (await _readTableWithFormulaFlags(RESULT_TABLE)).filter((r) => _isActive(r, "ResultID")); }
+  async function readTaskOutcomeLinks() { return (await _readTableWithFormulaFlags(OUTCOME_LINK_TABLE)).filter((r) => _isActive(r, "LinkID")); }
+
+  async function readValueMetricsStatus() {
+    return Excel.run(async (ctx) => {
+      const tables = ctx.workbook.tables; tables.load("items/name");
+      const sheet = ctx.workbook.worksheets.getItemOrNullObject("④ Value Metrics"); sheet.load("isNullObject");
+      await ctx.sync();
+      const normalized = tables.items.some((t) => t.name === "ValueMetricsTable");
+      return {
+        available: !sheet.isNullObject,
+        normalized,
+        mode: normalized ? "normalized" : (sheet.isNullObject ? "missing" : "unsupported"),
+        message: normalized ? "ValueMetricsTable is available for stable-ID readout." : (sheet.isNullObject ? "The Value Metrics sheet is missing." : "Value Metrics exists, but it is not a normalized table. Metrics remain read-only and source-linked measures show an unsupported-source state."),
+        tableName: normalized ? "ValueMetricsTable" : ""
+      };
+    });
   }
-  async function readOutcomeMeasures() {
-    const rows = await _readTable(MEASURE_TABLE);
-    return rows.filter((r) => String(r.MeasureID || "").trim() && String(r.Archived || "").toLowerCase() !== "yes");
-  }
-  async function readOutcomeResults() {
-    const rows = await _readTable(RESULT_TABLE);
-    return rows.filter((r) => String(r.ResultID || "").trim() && String(r.Archived || "").toLowerCase() !== "yes");
-  }
-  async function readTaskOutcomeLinks() {
-    const rows = await _readTable(OUTCOME_LINK_TABLE);
-    return rows.filter((r) => String(r.LinkID || "").trim() && String(r.Archived || "").toLowerCase() !== "yes");
-  }
-  async function _verifiedUpsert(table, idHeader, idValue, fields, entityType) {
-    const me = await getCurrentUser();
-    const idx = await _findRowIndexById(table, idHeader, idValue);
-    const payload = Object.assign({}, fields, { LastUpdated: _nowIso(), UpdatedBy: me.name });
-    if (idx >= 0) await _updateRowMulti(table, idx, payload);
-    else await _appendObjByHeaders(table, Object.assign({}, payload, { [idHeader]: idValue, CreatedDate: _nowIso(), CreatedBy: me.name, Archived: "No" }));
-    const saved = (await _readTable(table)).find((r) => String(r[idHeader]) === String(idValue));
-    if (!saved) throw new Error(entityType + " save could not be verified. Form data was preserved.");
-    await logActivity(entityType, idValue, idx >= 0 ? "Updated" : "Created", "", "", "", "Verified after write");
+
+  async function _verifiedOutcomeUpsert(table, idHeader, idValue, fields, entityType) {
+    const rows = await _readTableWithFormulaFlags(table);
+    const prior = rows.find((r) => _sameId(r[idHeader], idValue));
+    const formulaFields = new Set(prior ? prior._formulaFields : []);
+    const safe = {};
+    Object.keys(fields).forEach((key) => { if (!formulaFields.has(key)) safe[key] = fields[key]; });
+    if (prior) await _updateRowMulti(table, prior._rowIndex, safe);
+    else await _appendObjByHeaders(table, Object.assign({}, safe, { [idHeader]: idValue }));
+    const saved = (await _readTableWithFormulaFlags(table)).find((r) => _sameId(r[idHeader], idValue));
+    if (!saved) throw new Error(entityType + " " + idValue + " was not found after save.");
+    Object.keys(safe).forEach((key) => {
+      if (key === "LastUpdated" || key === "UpdatedBy" || formulaFields.has(key)) return;
+      if (String(saved[key] == null ? "" : saved[key]).trim() !== String(safe[key] == null ? "" : safe[key]).trim()) throw new Error(entityType + " " + idValue + " partially saved. Field '" + key + "' did not persist.");
+    });
     return saved;
   }
+
   async function upsertOutcome(fields) {
-    let id = fields.OutcomeID;
-    if (!id) id = await _nextPrefixedId(OUTCOME_TABLE, "OutcomeID", "O");
-    const prior = fields.OutcomeID ? (await _readTable(OUTCOME_TABLE)).find((r) => String(r.OutcomeID) === String(fields.OutcomeID)) : null;
-    if (prior && String(prior.OriginalTarget || "") && String(fields.OriginalTarget || "") !== String(prior.OriginalTarget || "") && String(fields.TargetCorrectionApproved || "").toLowerCase() !== "yes") {
-      throw new Error("Original Target is locked. Use the correction flow and provide an approved correction reason.");
-    }
-    return _verifiedUpsert(OUTCOME_TABLE, "OutcomeID", id, fields, "Outcome");
+    fields = _pickWritable(fields || {}, OUTCOME_WRITABLE);
+    const id = String(fields.OutcomeID || "").trim() || await _nextPrefixedId(OUTCOME_TABLE, "OutcomeID", "OUT", 3);
+    const rows = await _readTableWithFormulaFlags(OUTCOME_TABLE), prior = rows.find((r) => _sameId(r.OutcomeID, id));
+    if (prior && String(prior.StatementLocked || "").toLowerCase() === "yes" && fields.ApprovedStatement != null && String(fields.ApprovedStatement) !== String(prior.ApprovedStatement || "")) throw new Error("Approved Statement is locked. Create an auditable correction instead of editing it directly.");
+    const me = await getCurrentUser(), now = _nowIso();
+    if (!prior) { fields.CreatedDate = fields.CreatedDate || now; fields.CreatedBy = fields.CreatedBy || me.name; }
+    fields.LastUpdated = now; fields.UpdatedBy = me.name;
+    return _verifiedOutcomeUpsert(OUTCOME_TABLE, "OutcomeID", id, fields, "Outcome");
   }
+
   async function upsertOutcomeMeasure(fields) {
-    let id = fields.MeasureID;
-    if (!id) id = await _nextPrefixedId(MEASURE_TABLE, "MeasureID", "M");
-    const prior = fields.MeasureID ? (await _readTable(MEASURE_TABLE)).find((r) => String(r.MeasureID) === String(fields.MeasureID)) : null;
-    if (prior && String(prior.OriginalTarget || "") && String(fields.OriginalTarget || "") !== String(prior.OriginalTarget || "") && String(fields.TargetCorrectionApproved || "").toLowerCase() !== "yes") throw new Error("Original Target is locked. Use the correction flow.");
-    return _verifiedUpsert(MEASURE_TABLE, "MeasureID", id, fields, "OutcomeMeasure");
+    fields = _pickWritable(fields || {}, MEASURE_WRITABLE);
+    const id = String(fields.MeasureID || "").trim() || await _nextPrefixedId(MEASURE_TABLE, "MeasureID", "MS", 3);
+    const rows = await _readTableWithFormulaFlags(MEASURE_TABLE), prior = rows.find((r) => _sameId(r.MeasureID, id));
+    if (prior && String(prior.OriginalTarget || "").trim() && fields.OriginalTarget != null && String(fields.OriginalTarget) !== String(prior.OriginalTarget || "")) {
+      if (String(fields.TargetCorrectionApproved || "").toLowerCase() !== "yes" || !String(fields.TargetCorrectionReason || "").trim()) throw new Error("Original Target is locked. An approved correction reason is required.");
+    }
+    const me = await getCurrentUser(), now = _nowIso();
+    if (!prior) { fields.CreatedDate = fields.CreatedDate || now; fields.CreatedBy = fields.CreatedBy || me.name; }
+    fields.LastUpdated = now; fields.UpdatedBy = me.name;
+    return _verifiedOutcomeUpsert(MEASURE_TABLE, "MeasureID", id, fields, "OutcomeMeasure");
   }
-  async function upsertOutcomeResult(fields) {
-    let id = fields.ResultID;
-    if (!id) id = await _nextPrefixedId(RESULT_TABLE, "ResultID", "R");
-    return _verifiedUpsert(RESULT_TABLE, "ResultID", id, fields, "OutcomeResult");
+
+  async function createOutcomeResult(fields) {
+    fields = _pickWritable(fields || {}, RESULT_MANUAL_WRITABLE);
+    if (fields.ResultID) throw new Error("Manual observations are append-only. Do not supply an existing ResultID.");
+    if (!String(fields.MeasureID || "").trim()) throw new Error("MeasureID is required.");
+    if (!["forecast","actual"].includes(String(fields.ResultType || "").toLowerCase())) throw new Error("ResultType must be Forecast or Actual.");
+    if (!String(fields.Value == null ? "" : fields.Value).trim()) throw new Error("Value is required.");
+    if (!String(fields.AsOfDate || "").trim()) throw new Error("AsOfDate is required.");
+    const id = await _nextPrefixedId(RESULT_TABLE, "ResultID", "RS", 3);
+    const me = await getCurrentUser(), now = _nowIso();
+    fields.CreatedDate = now; fields.CreatedBy = me.name; fields.LastUpdated = now; fields.UpdatedBy = me.name;
+    return _verifiedOutcomeUpsert(RESULT_TABLE, "ResultID", id, fields, "OutcomeResult");
   }
+
+  async function correctOutcomeResult(resultId, correction) {
+    const rows = await _readTableWithFormulaFlags(RESULT_TABLE), prior = rows.find((r) => _sameId(r.ResultID, resultId));
+    if (!prior) throw new Error("Result not found: " + resultId);
+    if ((prior._formulaFields || []).length) throw new Error("Formula-linked observations are live and read-only. Correct the source metric in Excel.");
+    if (!String(correction && correction.CorrectionReason || "").trim()) throw new Error("Correction reason is required.");
+    const replacement = {};
+    RESULT_MANUAL_WRITABLE.forEach((key) => { if (prior[key] != null && !["ResultID","CreatedDate","CreatedBy","LastUpdated","UpdatedBy"].includes(key)) replacement[key] = prior[key]; });
+    Object.keys(correction || {}).forEach((key) => { if (RESULT_MANUAL_WRITABLE.has(key)) replacement[key] = correction[key]; });
+    replacement.VarianceReason = "Correction of " + resultId + ": " + correction.CorrectionReason + (replacement.VarianceReason ? " | " + replacement.VarianceReason : "");
+    const saved = await createOutcomeResult(replacement);
+    await _verifiedOutcomeUpsert(RESULT_TABLE, "ResultID", resultId, { EvidenceStatus: "Corrected", VarianceReason: (prior.VarianceReason ? prior.VarianceReason + " | " : "") + "Superseded by " + saved.ResultID + ": " + correction.CorrectionReason, LastUpdated: _nowIso(), UpdatedBy: (await getCurrentUser()).name }, "OutcomeResult");
+    await logActivity("OutcomeResult", saved.ResultID, "Corrected", "", resultId, correction.CorrectionReason, "Replacement observation persisted; original retained and marked Corrected.");
+    return saved;
+  }
+
   async function archiveOutcome(outcomeId) { return upsertOutcome({ OutcomeID: outcomeId, Archived: "Yes" }); }
   async function syncTaskOutcomeLinks(parentType, parentId, outcomeIds, primaryOutcomeId) {
-    const current = (await _readTable(OUTCOME_LINK_TABLE)).filter((r) => String(r.ParentType) === String(parentType) && String(r.ParentID) === String(parentId));
-    for (const row of current) if (String(row.Archived || "").toLowerCase() !== "yes") await _updateRowMulti(OUTCOME_LINK_TABLE, row._rowIndex, { Archived: "Yes", LastUpdated: _nowIso() });
-    for (const outcomeId of Array.from(new Set(outcomeIds || []))) {
-      const id = await _nextPrefixedId(OUTCOME_LINK_TABLE, "LinkID", "OL");
-      await _verifiedUpsert(OUTCOME_LINK_TABLE, "LinkID", id, { ParentType: parentType, ParentID: parentId, OutcomeID: outcomeId, LinkType: String(outcomeId) === String(primaryOutcomeId) ? "Primary" : "Additional", Archived: "No" }, "OutcomeLink");
+    const desired = Array.from(new Set((outcomeIds || []).map((v) => String(v || "").trim()).filter(Boolean)));
+    if (primaryOutcomeId && !desired.some((v) => _sameId(v, primaryOutcomeId))) desired.unshift(String(primaryOutcomeId));
+    const current = (await _readTableWithFormulaFlags(OUTCOME_LINK_TABLE)).filter((r) => _sameId(r.ParentType, parentType) && _sameId(r.ParentID, parentId));
+    const me = await getCurrentUser(), now = _nowIso();
+    for (const outcomeId of desired) {
+      const prior = current.find((r) => _sameId(r.OutcomeID, outcomeId));
+      const payload = { ParentType: parentType, ParentID: String(parentId), OutcomeID: outcomeId, ContributionType: prior ? prior.ContributionType : "", IsPrimary: _sameId(outcomeId, primaryOutcomeId) ? "Yes" : "No", EvidenceStatus: prior ? prior.EvidenceStatus : "", EvidenceNote: prior ? prior.EvidenceNote : "", Archived: "No", LastUpdated: now, UpdatedBy: me.name };
+      if (prior) await _verifiedOutcomeUpsert(OUTCOME_LINK_TABLE, "LinkID", prior.LinkID, payload, "OutcomeLink");
+      else { payload.CreatedDate = now; payload.CreatedBy = me.name; await _verifiedOutcomeUpsert(OUTCOME_LINK_TABLE, "LinkID", await _nextPrefixedId(OUTCOME_LINK_TABLE, "LinkID", "TOL", 4), payload, "OutcomeLink"); }
     }
+    for (const row of current) if (_isActive(row, "LinkID") && !desired.some((id) => _sameId(id, row.OutcomeID))) await _verifiedOutcomeUpsert(OUTCOME_LINK_TABLE, "LinkID", row.LinkID, { Archived: "Yes", LastUpdated: now, UpdatedBy: me.name }, "OutcomeLink");
     return readTaskOutcomeLinks();
   }
 
@@ -1169,7 +1239,7 @@
     getCurrentUser, setCurrentUser,
     // tasks
     readAllTasks, readArchivedTasks, readTaskById, readKeyResults, readTaskKeyResultLinks, readAllAttachments,
-    readOutcomes, readOutcomeMeasures, readOutcomeResults, readTaskOutcomeLinks,
+    readOutcomes, readOutcomeMeasures, readOutcomeResults, readTaskOutcomeLinks, readValueMetricsStatus,
     writeTask, writeTaskStatus, setTaskRoadmapGroup, createTask, archiveTask,
     // children
     readSubtasksForTask, readAttachmentsForTask, readActivityForTask,
@@ -1189,7 +1259,7 @@
     readRoadmapGroups, upsertRoadmapGroup, deleteRoadmapGroup, importRoadmapGroups, saveSubtasksBatch,
     createGoal, updateGoal, deleteGoal,
     createKeyResult, updateKeyResult, archiveKeyResult,
-    upsertOutcome, upsertOutcomeMeasure, upsertOutcomeResult, archiveOutcome, syncTaskOutcomeLinks,
+    upsertOutcome, upsertOutcomeMeasure, createOutcomeResult, correctOutcomeResult, archiveOutcome, syncTaskOutcomeLinks,
     syncTaskKeyResultLinks, updateTaskKeyResultLink,
     // milestones (standalone roadmap lines)
     readMilestones, createMilestone, updateMilestone, deleteMilestone,
